@@ -1,0 +1,122 @@
+-- ============================================================
+-- Migration: Notification Settings + Email Templates tables
+-- Date: 2026-03-02
+-- Purpose: Admin-configurable notification preferences and
+--          editable email templates for the TMS
+-- ============================================================
+
+-- ─── 1. Notification Settings ────────────────────────────────
+-- Stores system-wide notification preferences (singleton row per setting key).
+-- Admin can toggle alert types, set thresholds, configure recipients.
+CREATE TABLE IF NOT EXISTS notification_settings (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  setting_key TEXT NOT NULL UNIQUE,         -- e.g. 'demurrage_alerts', 'unassigned_alerts', 'vessel_alerts', 'settlement_notifications'
+  enabled BOOLEAN NOT NULL DEFAULT true,
+  config JSONB NOT NULL DEFAULT '{}',       -- Flexible config per setting (thresholds, recipients, timing, etc.)
+  updated_by UUID REFERENCES auth.users(id),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- RLS
+ALTER TABLE notification_settings ENABLE ROW LEVEL SECURITY;
+
+-- All staff can read notification settings
+DROP POLICY IF EXISTS "Staff read notification_settings" ON notification_settings;
+CREATE POLICY "Staff read notification_settings"
+  ON notification_settings FOR SELECT TO authenticated
+  USING (
+    (select get_user_role()) IN ('admin', 'dispatcher', 'accounting')
+  );
+
+-- Only admin can modify
+DROP POLICY IF EXISTS "Admin manage notification_settings" ON notification_settings;
+CREATE POLICY "Admin manage notification_settings"
+  ON notification_settings FOR ALL TO authenticated
+  USING ((select get_user_role()) = 'admin')
+  WITH CHECK ((select get_user_role()) = 'admin');
+
+-- Seed default settings
+INSERT INTO notification_settings (setting_key, enabled, config) VALUES
+  ('demurrage_alerts', true, '{"warning_days": 3, "critical_days": 1, "poll_interval_minutes": 5}'),
+  ('unassigned_load_alerts', true, '{"critical_after_hours": 24, "poll_interval_minutes": 5}'),
+  ('vessel_arrival_alerts', true, '{"show_arriving_today": true, "poll_interval_minutes": 5}'),
+  ('load_status_toasts', true, '{"toast_duration_seconds": 30, "max_visible": 5}'),
+  ('settlement_notifications', false, '{"notify_drivers_on_settlement": false, "notify_email": true}'),
+  ('ar_aging_alerts', true, '{"overdue_threshold_days": 30, "critical_threshold_days": 60}')
+ON CONFLICT (setting_key) DO NOTHING;
+
+
+-- ─── 2. Email Templates ─────────────────────────────────────
+-- Editable email templates for portal invites, notifications, etc.
+-- Supabase Auth emails (magic link, confirm) are configured in Supabase dashboard,
+-- but this table lets admins manage custom notification templates.
+CREATE TABLE IF NOT EXISTS email_templates (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  template_key TEXT NOT NULL UNIQUE,          -- e.g. 'portal_invite', 'settlement_ready', 'load_status_update'
+  name TEXT NOT NULL,                         -- Human-friendly name
+  subject TEXT NOT NULL,                      -- Email subject line (supports {{variables}})
+  body_html TEXT NOT NULL,                    -- HTML body (supports {{variables}})
+  variables TEXT[] NOT NULL DEFAULT '{}',     -- Available variables: ['customer_name', 'load_number', etc.]
+  is_active BOOLEAN NOT NULL DEFAULT true,
+  updated_by UUID REFERENCES auth.users(id),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- RLS
+ALTER TABLE email_templates ENABLE ROW LEVEL SECURITY;
+
+-- All staff can read email templates
+DROP POLICY IF EXISTS "Staff read email_templates" ON email_templates;
+CREATE POLICY "Staff read email_templates"
+  ON email_templates FOR SELECT TO authenticated
+  USING (
+    (select get_user_role()) IN ('admin', 'dispatcher', 'accounting')
+  );
+
+-- Only admin can modify
+DROP POLICY IF EXISTS "Admin manage email_templates" ON email_templates;
+CREATE POLICY "Admin manage email_templates"
+  ON email_templates FOR ALL TO authenticated
+  USING ((select get_user_role()) = 'admin')
+  WITH CHECK ((select get_user_role()) = 'admin');
+
+-- Seed default templates
+INSERT INTO email_templates (template_key, name, subject, body_html, variables) VALUES
+  (
+    'portal_welcome',
+    'Customer Portal Welcome',
+    'Welcome to TigerHawk Logistics Portal',
+    '<h2>Welcome, {{customer_name}}!</h2><p>Your portal account has been created. You can now track your shipments, view documents, and monitor your deliveries in real time.</p><p>Click the link in your magic link email to sign in.</p><p>— TigerHawk Logistics Team</p>',
+    ARRAY['customer_name', 'company_name']
+  ),
+  (
+    'settlement_ready',
+    'Driver Settlement Ready',
+    'Your Settlement is Ready — {{settlement_period}}',
+    '<h2>Settlement Ready</h2><p>Hi {{driver_name}},</p><p>Your settlement for the period <strong>{{settlement_period}}</strong> has been processed.</p><p><strong>Total Amount:</strong> {{total_amount}}</p><p>Please log in to review the details.</p><p>— TigerHawk Logistics</p>',
+    ARRAY['driver_name', 'settlement_period', 'total_amount']
+  ),
+  (
+    'load_status_update',
+    'Load Status Update',
+    'Load {{reference_number}} — Status Update',
+    '<h2>Load Status Update</h2><p>Hi {{customer_name}},</p><p>Your load <strong>{{reference_number}}</strong> has been updated:</p><p><strong>New Status:</strong> {{new_status}}</p><p>Log in to the portal for full details.</p><p>— TigerHawk Logistics</p>',
+    ARRAY['customer_name', 'reference_number', 'old_status', 'new_status']
+  ),
+  (
+    'ar_overdue_reminder',
+    'AR Overdue Reminder',
+    'Overdue Invoice Reminder — {{invoice_number}}',
+    '<h2>Payment Reminder</h2><p>Hi {{customer_name}},</p><p>This is a reminder that invoice <strong>{{invoice_number}}</strong> for <strong>{{amount}}</strong> is now <strong>{{days_overdue}} days overdue</strong>.</p><p>Please arrange payment at your earliest convenience.</p><p>— TigerHawk Logistics Accounting</p>',
+    ARRAY['customer_name', 'invoice_number', 'amount', 'days_overdue', 'due_date']
+  ),
+  (
+    'portal_invite',
+    'Customer Portal Invitation',
+    'You''ve been invited to the TigerHawk Logistics Portal',
+    '<h2>Portal Access Invitation</h2><p>Hi {{contact_name}},</p><p>You have been granted access to the TigerHawk Logistics customer portal for <strong>{{company_name}}</strong>.</p><p>Click the magic link in the sign-in email to get started.</p><p>— TigerHawk Logistics Team</p>',
+    ARRAY['contact_name', 'company_name']
+  )
+ON CONFLICT (template_key) DO NOTHING;

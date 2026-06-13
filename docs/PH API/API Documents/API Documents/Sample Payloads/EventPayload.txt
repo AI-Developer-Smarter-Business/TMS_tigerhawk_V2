@@ -1,0 +1,61 @@
+Event Payload
+/service/events
+
+
+
+{
+  "extras": {
+    "additionalProp1": {},
+    "additionalProp2": {},
+    "additionalProp3": {}
+  },
+  "scope": {
+    "yard_gkey": 0,
+    "yard_id": "string",
+    "facility_gkey": 0,
+    "facility_id": "string",
+    "complex_gkey": 0,
+    "complex_id": "string",
+    "operator_gkey": 0,
+    "operator_id": "string",
+    "instance_id": "string",
+    "level": "GLOBAL"
+  },
+  "gkey": 0,
+  "appliedBy": "string",
+  "appliedDate": "2025-03-27T20:16:34.073Z",
+  "eventTypeGkey": 0,
+  "eventTypeId": "string",
+  "appliedToClass": "EQ",
+  "appliedToPrimaryKey": 0,
+  "appliedToNaturalKey": "string",
+  "note": "string",
+  "quantity": 0,
+  "quantityUnit": "string",
+  "responsiblePartyGkey": 0,
+  "relatedEntityGkey": 0,
+  "relatedEntityId": "string",
+  "relatedEntityClass": "string",
+  "relatedBatchNbr": 0,
+  "acknowledged": "2025-03-27T20:16:34.073Z",
+  "acknowledgedBy": "string",
+  "flexString01": "string",
+  "flexString02": "string",
+  "flexString03": "string",
+  "flexString04": "string",
+  "flexString05": "string",
+  "flexDate01": "2025-03-27T20:16:34.073Z",
+  "flexDate02": "2025-03-27T20:16:34.073Z",
+  "flexDate03": "2025-03-27T20:16:34.073Z",
+  "flexDouble01": 0,
+  "flexDouble02": 0,
+  "flexDouble03": 0,
+  "flexDouble04": 0,
+  "flexDouble05": 0,
+  "created": "2025-03-27T20:16:34.073Z",
+  "creator": "string",
+  "changed": "2025-03-27T20:16:34.073Z",
+  "changer": "string",
+  "primaryEventGkey": 0,
+  "eventClusterNode": "string"
+}

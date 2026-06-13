@@ -1,0 +1,49 @@
+-- Create load_audit_log table for per-load field-level audit trail
+-- The load detail AuditTab reads from this table.
+-- The RLS policies already exist (from 20260225_optimize_rls_performance.sql)
+-- but the table itself was never created.
+
+CREATE TABLE IF NOT EXISTS load_audit_log (
+  id            uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  load_id       uuid NOT NULL REFERENCES loads(id) ON DELETE CASCADE,
+  user_id       uuid,
+  user_name     text,
+  field_changed text NOT NULL,
+  old_value     text,
+  new_value     text,
+  changed_at    timestamptz DEFAULT now()
+);
+
+-- Index for fast lookups by load_id (the AuditTab queries by this)
+CREATE INDEX IF NOT EXISTS idx_load_audit_log_load_id
+  ON load_audit_log(load_id);
+
+-- Index for ordering by changed_at (the AuditTab orders descending)
+CREATE INDEX IF NOT EXISTS idx_load_audit_log_changed_at
+  ON load_audit_log(changed_at DESC);
+
+-- Enable RLS
+ALTER TABLE load_audit_log ENABLE ROW LEVEL SECURITY;
+
+-- RLS policies (re-create safely with IF NOT EXISTS pattern via DROP IF EXISTS)
+-- These may already exist from the optimize_rls_performance migration, but that
+-- migration would have failed if the table didn't exist yet, so recreate them.
+DROP POLICY IF EXISTS "Authenticated read load_audit_log" ON load_audit_log;
+CREATE POLICY "Authenticated read load_audit_log"
+  ON load_audit_log FOR SELECT TO authenticated
+  USING (true);
+
+DROP POLICY IF EXISTS "Staff insert load_audit_log" ON load_audit_log;
+CREATE POLICY "Staff insert load_audit_log"
+  ON load_audit_log FOR INSERT TO authenticated
+  WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Staff update load_audit_log" ON load_audit_log;
+CREATE POLICY "Staff update load_audit_log"
+  ON load_audit_log FOR UPDATE TO authenticated
+  USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Staff delete load_audit_log" ON load_audit_log;
+CREATE POLICY "Staff delete load_audit_log"
+  ON load_audit_log FOR DELETE TO authenticated
+  USING (true);

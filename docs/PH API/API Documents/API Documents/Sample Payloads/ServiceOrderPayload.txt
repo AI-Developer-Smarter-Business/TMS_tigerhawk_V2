@@ -1,0 +1,167 @@
+ServiceOrder Payload
+/orders/serviceorder
+
+{
+  "extras": {
+    "additionalProp1": {},
+    "additionalProp2": {},
+    "additionalProp3": {}
+  },
+  "scope": {
+    "yard_gkey": 0,
+    "yard_id": "string",
+    "facility_gkey": 0,
+    "facility_id": "string",
+    "complex_gkey": 0,
+    "complex_id": "string",
+    "operator_gkey": 0,
+    "operator_id": "string",
+    "instance_id": "string",
+    "level": "GLOBAL"
+  },
+  "gkey": 0,
+  "subType": "ABSRVO",
+  "serviceOrderNbr": "string",
+  "orderStatus": "NEW",
+  "srvoCancelDate": "2025-03-27T20:09:50.508Z",
+  "cancelNotes": "string",
+  "notes": "string",
+  "srvoStartDate": "2025-03-27T20:09:50.508Z",
+  "srvoCompletionDate": "2025-03-27T20:09:50.508Z",
+  "billingPartyGkey": 0,
+  "lineOpGkey": 0,
+  "fcyGkey": 0,
+  "created": "2025-03-27T20:09:50.508Z",
+  "creator": "string",
+  "changed": "2025-03-27T20:09:50.508Z",
+  "changer": "string",
+  "flexString1": "string",
+  "flexString2": "string",
+  "flexString3": "string",
+  "flexString4": "string",
+  "flexString5": "string",
+  "flexString6": "string",
+  "flexString7": "string",
+  "flexString8": "string",
+  "flexString9": "string",
+  "flexString10": "string",
+  "flexDouble1": 0,
+  "flexDouble2": 0,
+  "flexDouble3": 0,
+  "flexDouble4": 0,
+  "flexDouble5": 0,
+  "flexDate1": "2025-03-27T20:09:50.508Z",
+  "flexDate2": "2025-03-27T20:09:50.508Z",
+  "flexDate3": "2025-03-27T20:09:50.508Z",
+  "flexDate4": "2025-03-27T20:09:50.508Z",
+  "flexDate5": "2025-03-27T20:09:50.508Z",
+  "lineId": "string",
+  "fcyName": "string",
+  "billingPartyId": "string",
+  "blGkey": 0,
+  "blNbr": "string",
+  "eqoGkey": 0,
+  "eqOperatorId": "string",
+  "serviceOrderItems": [
+    {
+      "extras": {
+        "additionalProp1": {},
+        "additionalProp2": {},
+        "additionalProp3": {}
+      },
+      "scope": {
+        "yard_gkey": 0,
+        "yard_id": "string",
+        "facility_gkey": 0,
+        "facility_id": "string",
+        "complex_gkey": 0,
+        "complex_id": "string",
+        "operator_gkey": 0,
+        "operator_id": "string",
+        "instance_id": "string",
+        "level": "GLOBAL"
+      },
+      "gkey": 0,
+      "eqSize": "NOM05",
+      "eqIsoGroup": "GP",
+      "eqHeight": "NOM21",
+      "qty": 0,
+      "eqTypeGkey": 0,
+      "orderGkey": 0,
+      "created": "2025-03-27T20:09:50.508Z",
+      "creator": "string",
+      "changed": "2025-03-27T20:09:50.508Z",
+      "changer": "string",
+      "eqTypeId": "string",
+      "orderNbr": "string",
+      "itemServiceType": [
+        {
+          "extras": {
+            "additionalProp1": {},
+            "additionalProp2": {},
+            "additionalProp3": {}
+          },
+          "scope": {
+            "yard_gkey": 0,
+            "yard_id": "string",
+            "facility_gkey": 0,
+            "facility_id": "string",
+            "complex_gkey": 0,
+            "complex_id": "string",
+            "operator_gkey": 0,
+            "operator_id": "string",
+            "instance_id": "string",
+            "level": "GLOBAL"
+          },
+          "gkey": 0,
+          "srvOrderItemGkey": 0,
+          "eventTypeGkey": 0,
+          "qty": 0,
+          "created": "2025-03-27T20:09:50.508Z",
+          "creator": "string",
+          "changed": "2025-03-27T20:09:50.508Z",
+          "changer": "string",
+          "eventTypeId": "string",
+          "eqSize": "NOM05",
+          "eqIsoGroup": "GP",
+          "eqHeight": "NOM21",
+          "eqTypeId": "string",
+          "orderNbr": "string",
+          "itemServiceTypeUnit": [
+            {
+              "extras": {
+                "additionalProp1": {},
+                "additionalProp2": {},
+                "additionalProp3": {}
+              },
+              "scope": {
+                "yard_gkey": 0,
+                "yard_id": "string",
+                "facility_gkey": 0,
+                "facility_id": "string",
+                "complex_gkey": 0,
+                "complex_id": "string",
+                "operator_gkey": 0,
+                "operator_id": "string",
+                "instance_id": "string",
+                "level": "GLOBAL"
+              },
+              "gkey": 0,
+              "unitStatus": "NEW",
+              "relatedUnit": "string",
+              "unitGkey": 0,
+              "itemServiceTypeGkey": 0,
+              "serviceEventGkey": 0,
+              "created": "2025-03-27T20:09:50.508Z",
+              "creator": "string",
+              "changed": "2025-03-27T20:09:50.508Z",
+              "changer": "string",
+              "unitId": "string",
+              "eventTypeId": "string"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

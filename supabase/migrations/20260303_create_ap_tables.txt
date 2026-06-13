@@ -1,0 +1,209 @@
+-- ============================================================
+-- Create core Accounts Payable tables
+-- ============================================================
+-- These tables back the existing A/P API routes and UI pages.
+-- Columns are derived directly from what the API routes SELECT,
+-- INSERT, and JOIN on, so the app works out-of-the-box once
+-- this migration runs.
+--
+-- Depends on: drivers, loads (must already exist)
+-- ============================================================
+
+-- ============================================================
+-- 1. ap_settlements (created first — referenced by FK from others)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS ap_settlements (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  settlement_number TEXT UNIQUE NOT NULL,
+  driver_id       UUID NOT NULL REFERENCES drivers(id) ON DELETE RESTRICT,
+  fleet_owner     TEXT,
+  truck_number    TEXT,
+  period_start    DATE NOT NULL,
+  period_end      DATE NOT NULL,
+  total_driver_pay NUMERIC(12,2) NOT NULL DEFAULT 0,
+  total_deductions NUMERIC(12,2) NOT NULL DEFAULT 0,
+  net_pay         NUMERIC(12,2) NOT NULL DEFAULT 0,
+  status          TEXT NOT NULL DEFAULT 'Pending'
+                    CHECK (status IN ('Pending','Reviewed','Finalized','Paid')),
+  reviewed_at     TIMESTAMPTZ,
+  finalized_at    TIMESTAMPTZ,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  CONSTRAINT ap_settlements_period_check CHECK (period_end >= period_start)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ap_settlements_driver    ON ap_settlements(driver_id);
+CREATE INDEX IF NOT EXISTS idx_ap_settlements_status    ON ap_settlements(status);
+CREATE INDEX IF NOT EXISTS idx_ap_settlements_period    ON ap_settlements(period_start, period_end);
+
+-- ============================================================
+-- 2. ap_driver_pay
+-- ============================================================
+CREATE TABLE IF NOT EXISTS ap_driver_pay (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  driver_id       UUID NOT NULL REFERENCES drivers(id) ON DELETE RESTRICT,
+  load_id         UUID REFERENCES loads(id) ON DELETE SET NULL,
+  container_number TEXT,
+  truck_number    TEXT,
+  owner           TEXT,
+  load_status     TEXT,
+  from_location   TEXT,
+  to_location     TEXT,
+  pay_date        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  amount          NUMERIC(12,2) NOT NULL DEFAULT 0,
+  status          TEXT NOT NULL DEFAULT 'Unapproved'
+                    CHECK (status IN ('Unapproved','Approved','Settled','Paid')),
+  settlement_id   UUID REFERENCES ap_settlements(id) ON DELETE SET NULL,
+  notes           TEXT,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_ap_driver_pay_driver     ON ap_driver_pay(driver_id);
+CREATE INDEX IF NOT EXISTS idx_ap_driver_pay_load       ON ap_driver_pay(load_id);
+CREATE INDEX IF NOT EXISTS idx_ap_driver_pay_settlement ON ap_driver_pay(settlement_id);
+CREATE INDEX IF NOT EXISTS idx_ap_driver_pay_status     ON ap_driver_pay(status);
+CREATE INDEX IF NOT EXISTS idx_ap_driver_pay_date       ON ap_driver_pay(pay_date);
+
+-- ============================================================
+-- 3. ap_deductions
+-- ============================================================
+CREATE TABLE IF NOT EXISTS ap_deductions (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  driver_id       UUID NOT NULL REFERENCES drivers(id) ON DELETE RESTRICT,
+  settlement_id   UUID REFERENCES ap_settlements(id) ON DELETE SET NULL,
+  deduction_type  TEXT NOT NULL,
+  description     TEXT,
+  unit_of_measure TEXT DEFAULT 'Flat Amount',
+  math_operation  TEXT DEFAULT 'Subtract',
+  amount          NUMERIC(12,2) NOT NULL DEFAULT 0,
+  final_amount    NUMERIC(12,2) NOT NULL DEFAULT 0,
+  deduction_date  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  status          TEXT NOT NULL DEFAULT 'Unapproved'
+                    CHECK (status IN ('Unapproved','Approved','Settled')),
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_ap_deductions_driver     ON ap_deductions(driver_id);
+CREATE INDEX IF NOT EXISTS idx_ap_deductions_settlement ON ap_deductions(settlement_id);
+CREATE INDEX IF NOT EXISTS idx_ap_deductions_status     ON ap_deductions(status);
+CREATE INDEX IF NOT EXISTS idx_ap_deductions_date       ON ap_deductions(deduction_date);
+
+-- ============================================================
+-- 4. ap_dynamic_expenses
+-- ============================================================
+CREATE TABLE IF NOT EXISTS ap_dynamic_expenses (
+  id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  expense_name      TEXT NOT NULL,
+  description       TEXT,
+  expense_category  TEXT,
+  calculation_type  TEXT NOT NULL CHECK (calculation_type IN ('fixed','percentage')),
+  base_amount       NUMERIC(12,2),
+  percentage        NUMERIC(8,4),
+  is_active         BOOLEAN NOT NULL DEFAULT true,
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_ap_dynamic_expenses_active ON ap_dynamic_expenses(is_active);
+
+-- ============================================================
+-- 5. Enable RLS (matches existing policy migration)
+-- ============================================================
+-- The RLS policies are already defined in 20260225_enable_rls_ar_ap_tables.sql
+-- but they require the tables to exist first. Re-apply them here so they
+-- take effect regardless of migration ordering.
+
+ALTER TABLE ap_settlements ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ap_driver_pay ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ap_deductions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ap_dynamic_expenses ENABLE ROW LEVEL SECURITY;
+
+-- ap_settlements policies
+DROP POLICY IF EXISTS "Authenticated users can read ap_settlements" ON ap_settlements;
+CREATE POLICY "Authenticated users can read ap_settlements"
+  ON ap_settlements FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS "Authenticated users can insert ap_settlements" ON ap_settlements;
+CREATE POLICY "Authenticated users can insert ap_settlements"
+  ON ap_settlements FOR INSERT TO authenticated WITH CHECK (true);
+DROP POLICY IF EXISTS "Authenticated users can update ap_settlements" ON ap_settlements;
+CREATE POLICY "Authenticated users can update ap_settlements"
+  ON ap_settlements FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Authenticated users can delete ap_settlements" ON ap_settlements;
+CREATE POLICY "Authenticated users can delete ap_settlements"
+  ON ap_settlements FOR DELETE TO authenticated USING (true);
+
+-- ap_driver_pay policies
+DROP POLICY IF EXISTS "Authenticated users can read ap_driver_pay" ON ap_driver_pay;
+CREATE POLICY "Authenticated users can read ap_driver_pay"
+  ON ap_driver_pay FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS "Authenticated users can insert ap_driver_pay" ON ap_driver_pay;
+CREATE POLICY "Authenticated users can insert ap_driver_pay"
+  ON ap_driver_pay FOR INSERT TO authenticated WITH CHECK (true);
+DROP POLICY IF EXISTS "Authenticated users can update ap_driver_pay" ON ap_driver_pay;
+CREATE POLICY "Authenticated users can update ap_driver_pay"
+  ON ap_driver_pay FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Authenticated users can delete ap_driver_pay" ON ap_driver_pay;
+CREATE POLICY "Authenticated users can delete ap_driver_pay"
+  ON ap_driver_pay FOR DELETE TO authenticated USING (true);
+
+-- ap_deductions policies
+DROP POLICY IF EXISTS "Authenticated users can read ap_deductions" ON ap_deductions;
+CREATE POLICY "Authenticated users can read ap_deductions"
+  ON ap_deductions FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS "Authenticated users can insert ap_deductions" ON ap_deductions;
+CREATE POLICY "Authenticated users can insert ap_deductions"
+  ON ap_deductions FOR INSERT TO authenticated WITH CHECK (true);
+DROP POLICY IF EXISTS "Authenticated users can update ap_deductions" ON ap_deductions;
+CREATE POLICY "Authenticated users can update ap_deductions"
+  ON ap_deductions FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Authenticated users can delete ap_deductions" ON ap_deductions;
+CREATE POLICY "Authenticated users can delete ap_deductions"
+  ON ap_deductions FOR DELETE TO authenticated USING (true);
+
+-- ap_dynamic_expenses policies
+DROP POLICY IF EXISTS "Authenticated users can read ap_dynamic_expenses" ON ap_dynamic_expenses;
+CREATE POLICY "Authenticated users can read ap_dynamic_expenses"
+  ON ap_dynamic_expenses FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS "Authenticated users can insert ap_dynamic_expenses" ON ap_dynamic_expenses;
+CREATE POLICY "Authenticated users can insert ap_dynamic_expenses"
+  ON ap_dynamic_expenses FOR INSERT TO authenticated WITH CHECK (true);
+DROP POLICY IF EXISTS "Authenticated users can update ap_dynamic_expenses" ON ap_dynamic_expenses;
+CREATE POLICY "Authenticated users can update ap_dynamic_expenses"
+  ON ap_dynamic_expenses FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Authenticated users can delete ap_dynamic_expenses" ON ap_dynamic_expenses;
+CREATE POLICY "Authenticated users can delete ap_dynamic_expenses"
+  ON ap_dynamic_expenses FOR DELETE TO authenticated USING (true);
+
+-- ============================================================
+-- 6. updated_at triggers (auto-set on UPDATE)
+-- ============================================================
+CREATE OR REPLACE FUNCTION set_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_ap_settlements_updated_at ON ap_settlements;
+CREATE TRIGGER trg_ap_settlements_updated_at
+  BEFORE UPDATE ON ap_settlements
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_ap_driver_pay_updated_at ON ap_driver_pay;
+CREATE TRIGGER trg_ap_driver_pay_updated_at
+  BEFORE UPDATE ON ap_driver_pay
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_ap_deductions_updated_at ON ap_deductions;
+CREATE TRIGGER trg_ap_deductions_updated_at
+  BEFORE UPDATE ON ap_deductions
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_ap_dynamic_expenses_updated_at ON ap_dynamic_expenses;
+CREATE TRIGGER trg_ap_dynamic_expenses_updated_at
+  BEFORE UPDATE ON ap_dynamic_expenses
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();

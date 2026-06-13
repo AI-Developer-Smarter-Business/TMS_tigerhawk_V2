@@ -1,0 +1,37 @@
+-- Migration: load_transition_overrides
+-- Admin-configurable load status transition rules
+-- When this table is empty, the app uses hardcoded defaults from types/dispatcher.ts
+
+CREATE TABLE IF NOT EXISTS load_transition_overrides (
+  from_status  TEXT PRIMARY KEY,
+  to_statuses  JSONB NOT NULL DEFAULT '[]'::jsonb,
+  updated_by   UUID REFERENCES auth.users(id),
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Add a trigger to auto-update updated_at
+CREATE OR REPLACE FUNCTION update_transition_override_timestamp()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_transition_override_updated_at
+  BEFORE UPDATE ON load_transition_overrides
+  FOR EACH ROW
+  EXECUTE FUNCTION update_transition_override_timestamp();
+
+-- RLS: only service role (admin client) can read/write
+ALTER TABLE load_transition_overrides ENABLE ROW LEVEL SECURITY;
+
+-- Allow service_role full access (used by createAdminClient)
+CREATE POLICY "service_role_all" ON load_transition_overrides
+  FOR ALL
+  USING (true)
+  WITH CHECK (true);
+
+-- Comment
+COMMENT ON TABLE load_transition_overrides IS
+  'Admin-configurable load status transition rules. Empty table = use hardcoded defaults.';

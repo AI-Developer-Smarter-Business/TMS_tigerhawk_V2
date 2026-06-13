@@ -1,0 +1,3 @@
+id,name,pay_type,base_rate,is_company_driver,default_service_type,notes,rate_profile_id,rate_profile_name
+,Linehaul Team A,per_move,150.00,false,drayage,"Example row — set rate_profile_name to exact Rate Profile name in TMS",,
+,Hourly Yard,hourly,28.50,true,yard,"Second example; pay_type must be per_move hourly per_mile percentage flat",,

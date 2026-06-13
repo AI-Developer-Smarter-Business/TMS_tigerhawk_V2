@@ -1,0 +1,10 @@
+---
+description: Hosting and deploy — Netlify for development; avoid Vercel
+alwaysApply: true
+---
+
+# Deploy y hosting (TigerHawk TMS)
+
+- **Desarrollo / preview:** el despliegue en desarrollo usa **Netlify**, no Vercel.
+- **Evitar Vercel:** no proponer Vercel como plataforma de deploy, no añadir dependencias de flujo o documentación centrados en Vercel salvo que el usuario lo pida explícitamente. El equipo evita Vercel por motivos de seguridad (incidente previo).
+- Al documentar deploy, CI o variables de entorno, **priorizar Netlify** y patrones genéricos (Node, Next build, etc.). Si el repo aún contiene artefactos heredados (p. ej. `vercel.json`), tratarlos como legado hasta que se migre o retire, sin ampliar el uso de Vercel.

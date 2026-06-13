@@ -1,0 +1,148 @@
+-- ============================================================
+-- Create accessorials catalog and group rules tables
+-- ============================================================
+-- These tables were referenced by RLS policies and API routes
+-- but never created. This migration creates them with seed data
+-- for common drayage/intermodal accessorials.
+-- ============================================================
+
+-- ============================================================
+-- 1. accessorials — Global accessorial catalog
+-- ============================================================
+CREATE TABLE IF NOT EXISTS accessorials (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  code            TEXT NOT NULL UNIQUE,
+  name            TEXT NOT NULL,
+  description     TEXT,
+  charge_type     TEXT NOT NULL DEFAULT 'fixed'
+                    CHECK (charge_type IN ('fixed','percentage','tiered','per_hour','per_mile')),
+  default_amount  NUMERIC(12,2),
+
+  -- Trigger configuration — when this accessorial auto-applies
+  trigger_type    TEXT CHECK (trigger_type IN (
+    'load_property',      -- e.g. is_hazmat, is_overweight
+    'event_threshold',    -- e.g. detention_hours > 2
+    'location_type',      -- pickup/delivery location type
+    'container_size',     -- container size filter
+    'load_type',          -- import/export filter
+    'manual'              -- dispatcher manually adds
+  )),
+  trigger_config  JSONB,          -- { field, operator, threshold, value, ... }
+
+  -- Additional filters
+  container_sizes TEXT[],         -- e.g. {'20','40','45'} — applies only to these sizes
+  load_types      TEXT[],         -- e.g. {'Import','Export'} — applies only to these types
+
+  is_active       BOOLEAN NOT NULL DEFAULT true,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_accessorials_code     ON accessorials(code);
+CREATE INDEX IF NOT EXISTS idx_accessorials_active   ON accessorials(is_active) WHERE is_active = true;
+CREATE INDEX IF NOT EXISTS idx_accessorials_trigger  ON accessorials(trigger_type);
+
+-- ============================================================
+-- 2. accessorial_group_rules — Link accessorials to driver groups
+-- ============================================================
+CREATE TABLE IF NOT EXISTS accessorial_group_rules (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  accessorial_id  UUID NOT NULL REFERENCES accessorials(id) ON DELETE CASCADE,
+  group_id        UUID NOT NULL REFERENCES driver_groups(id) ON DELETE CASCADE,
+  override_amount NUMERIC(12,2),  -- optional override of default_amount for this group
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  UNIQUE(accessorial_id, group_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_acc_group_rules_acc   ON accessorial_group_rules(accessorial_id);
+CREATE INDEX IF NOT EXISTS idx_acc_group_rules_grp   ON accessorial_group_rules(group_id);
+
+-- ============================================================
+-- 3. RLS — matches existing pattern (authenticated CRUD)
+-- ============================================================
+ALTER TABLE accessorials ENABLE ROW LEVEL SECURITY;
+ALTER TABLE accessorial_group_rules ENABLE ROW LEVEL SECURITY;
+
+-- accessorials
+DROP POLICY IF EXISTS "Allow authenticated read on accessorials" ON accessorials;
+CREATE POLICY "Allow authenticated read on accessorials"
+  ON accessorials FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS "Allow authenticated insert on accessorials" ON accessorials;
+CREATE POLICY "Allow authenticated insert on accessorials"
+  ON accessorials FOR INSERT TO authenticated WITH CHECK (true);
+DROP POLICY IF EXISTS "Allow authenticated update on accessorials" ON accessorials;
+CREATE POLICY "Allow authenticated update on accessorials"
+  ON accessorials FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Allow authenticated delete on accessorials" ON accessorials;
+CREATE POLICY "Allow authenticated delete on accessorials"
+  ON accessorials FOR DELETE TO authenticated USING (true);
+
+-- accessorial_group_rules
+DROP POLICY IF EXISTS "Allow authenticated read on accessorial_group_rules" ON accessorial_group_rules;
+CREATE POLICY "Allow authenticated read on accessorial_group_rules"
+  ON accessorial_group_rules FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS "Allow authenticated insert on accessorial_group_rules" ON accessorial_group_rules;
+CREATE POLICY "Allow authenticated insert on accessorial_group_rules"
+  ON accessorial_group_rules FOR INSERT TO authenticated WITH CHECK (true);
+DROP POLICY IF EXISTS "Allow authenticated update on accessorial_group_rules" ON accessorial_group_rules;
+CREATE POLICY "Allow authenticated update on accessorial_group_rules"
+  ON accessorial_group_rules FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Allow authenticated delete on accessorial_group_rules" ON accessorial_group_rules;
+CREATE POLICY "Allow authenticated delete on accessorial_group_rules"
+  ON accessorial_group_rules FOR DELETE TO authenticated USING (true);
+
+-- ============================================================
+-- 4. updated_at trigger
+-- ============================================================
+CREATE OR REPLACE FUNCTION set_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_accessorials_updated_at ON accessorials;
+CREATE TRIGGER trg_accessorials_updated_at
+  BEFORE UPDATE ON accessorials
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- ============================================================
+-- 5. Seed standard drayage/intermodal accessorials
+-- ============================================================
+INSERT INTO accessorials (code, name, description, charge_type, default_amount, trigger_type, trigger_config) VALUES
+  -- Load-property triggered (auto-apply when flag is set)
+  ('ACC-HAZ',    'Hazmat',                'Hazardous materials surcharge',                  'fixed',     150.00,  'load_property', '{"field": "is_hazmat", "value": true}'),
+  ('ACC-OW',     'Overweight',            'Overweight container surcharge (>44,000 lbs)',   'fixed',     125.00,  'load_property', '{"field": "is_overweight", "value": true}'),
+  ('ACC-OOG',    'Out of Gauge',          'Over-dimensional / out of gauge charge',         'fixed',     200.00,  'load_property', '{"field": "is_oog", "value": true}'),
+  ('ACC-REEFER', 'Reefer',                'Refrigerated container handling',                'fixed',      75.00,  'load_property', '{"field": "is_genset", "value": true}'),
+  ('ACC-BOND',   'Bonded Cargo',          'Bonded cargo compliance surcharge',              'fixed',      85.00,  'load_property', '{"field": "is_bonded", "value": true}'),
+  ('ACC-TANK',   'Tanker Endorsement',    'Tanker endorsement required surcharge',          'fixed',      65.00,  'load_property', '{"field": "is_tanker", "value": true}'),
+  ('ACC-SCALE',  'Scale Load',            'Scale ticket and weigh station charge',          'fixed',      35.00,  'load_property', '{"field": "is_scale", "value": true}'),
+  ('ACC-LIQ',    'Liquor',                'Liquor shipment additional handling',            'fixed',      50.00,  'load_property', '{"field": "is_liquor", "value": true}'),
+  ('ACC-HOT',    'Hot Load / Priority',   'Expedited/priority load surcharge',              'fixed',      75.00,  'load_property', '{"field": "is_hot", "value": true}'),
+  ('ACC-OH',     'Overheight',            'Overheight container requiring permits',         'fixed',     175.00,  'load_property', '{"field": "is_overheight", "value": true}'),
+  ('ACC-ST',     'Street Turn',           'Street turn handling fee',                       'fixed',      50.00,  'load_property', '{"field": "is_street_turn", "value": true}'),
+  ('ACC-EV',     'EV Surcharge',          'Electric vehicle drayage premium',               'fixed',       0.00,  'load_property', '{"field": "is_ev", "value": true}'),
+
+  -- Event/threshold triggered
+  ('ACC-DET',    'Detention',             'Waiting time beyond free time at pickup/delivery','per_hour',  75.00,  'event_threshold','{"field": "detention_hours", "operator": ">", "threshold": 1}'),
+  ('ACC-WAIT',   'Wait Time',             'Driver wait time charge (per hour)',              'per_hour',  75.00,  'event_threshold','{"field": "wait_time_hours", "operator": ">", "threshold": 0}'),
+  ('ACC-DEM',    'Demurrage',             'Container demurrage at terminal',                'fixed',     150.00,  'event_threshold','{"field": "demurrage_days", "operator": ">", "threshold": 0}'),
+  ('ACC-PERDIEM','Per Diem',              'Equipment per diem charges',                     'fixed',     100.00,  'event_threshold','{"field": "per_diem_days", "operator": ">", "threshold": 0}'),
+
+  -- Manual / dispatcher-applied
+  ('ACC-DRYRUN', 'Dry Run',              'Truck dispatched but load cancelled/unavailable', 'fixed',     150.00,  'manual',        NULL),
+  ('ACC-PREPULL','Pre-Pull',             'Container pre-pulled to yard before delivery',    'fixed',     125.00,  'manual',        NULL),
+  ('ACC-FLIP',   'Flip / Chassis Swap',  'Chassis flip or swap charge',                    'fixed',      85.00,  'manual',        NULL),
+  ('ACC-DROP',   'Drop Charge',          'Container drop at location',                     'fixed',      75.00,  'manual',        NULL),
+  ('ACC-STOP',   'Stop Off',             'Additional stop en route',                       'fixed',      95.00,  'manual',        NULL),
+  ('ACC-TOLLS',  'Tolls',                'Road toll reimbursement',                        'fixed',       0.00,  'manual',        NULL),
+  ('ACC-LUMPER', 'Lumper',               'Loading/unloading labor charge',                 'fixed',       0.00,  'manual',        NULL),
+  ('ACC-BOBTAIL','Bobtail',              'Bobtail move (tractor only, no container)',      'fixed',      95.00,  'manual',        NULL),
+  ('ACC-TARP',   'Tarp',                 'Tarping charge for flatbed/open-top',            'fixed',      85.00,  'manual',        NULL),
+  ('ACC-PIER',   'Pier/Port Congestion', 'Congestion surcharge at port/pier',              'fixed',      50.00,  'manual',        NULL),
+  ('ACC-SAT',    'Saturday Delivery',    'Weekend/Saturday delivery surcharge',             'fixed',     100.00,  'manual',        NULL),
+  ('ACC-REDELIVERY','Redelivery',        'Failed first delivery, return attempt',           'fixed',     175.00,  'manual',        NULL)
+ON CONFLICT (code) DO NOTHING;

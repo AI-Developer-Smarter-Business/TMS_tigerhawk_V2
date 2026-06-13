@@ -1,0 +1,111 @@
+-- ============================================================
+-- Create waiting_time_events table
+-- ============================================================
+-- Tracks driver wait time at pickup/delivery locations for both
+-- customer billing (A/R) and driver pay (A/P) purposes.
+-- Drivers log wait time during the load lifecycle; these records
+-- feed into:
+--   1. Billing → "Detention" charges on the customer invoice
+--   2. Driver pay → "Wait Time" accessorial on the driver settlement
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS waiting_time_events (
+  id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  load_id           UUID NOT NULL REFERENCES loads(id) ON DELETE CASCADE,
+  driver_id         UUID REFERENCES drivers(id) ON DELETE SET NULL,
+
+  -- Event details
+  event_name        TEXT NOT NULL CHECK (event_name IN (
+    'pickup_wait',        -- waiting at pickup (terminal/port)
+    'delivery_wait',      -- waiting at delivery (warehouse/customer)
+    'return_wait',        -- waiting at empty return
+    'customs_hold',       -- waiting due to customs hold
+    'yard_wait',          -- waiting at yard
+    'other'               -- general wait
+  )),
+  event_date        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  start_time        TIMESTAMPTZ,         -- actual start of wait
+  end_time          TIMESTAMPTZ,         -- actual end of wait
+  duration_minutes  INT NOT NULL DEFAULT 0,
+  location          TEXT,                -- where the wait occurred
+
+  -- Billing side (A/R — charge to customer)
+  billable          BOOLEAN NOT NULL DEFAULT true,
+  rate_per_hour     NUMERIC(10,2) DEFAULT 75.00,
+  charge_amount     NUMERIC(12,2) DEFAULT 0,        -- auto-computed: rate_per_hour × hours
+  free_time_minutes INT DEFAULT 60,                  -- free time before charges kick in
+
+  -- Driver pay side (A/P — pay to driver)
+  driver_payable    BOOLEAN NOT NULL DEFAULT true,
+  driver_rate_per_hour NUMERIC(10,2) DEFAULT 75.00,
+  driver_pay_amount NUMERIC(12,2) DEFAULT 0,         -- auto-computed: driver_rate × hours
+
+  -- Metadata
+  notes             TEXT,
+  logged_by         TEXT CHECK (logged_by IN ('driver','dispatcher','system')),
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_wait_events_load     ON waiting_time_events(load_id);
+CREATE INDEX IF NOT EXISTS idx_wait_events_driver   ON waiting_time_events(driver_id);
+CREATE INDEX IF NOT EXISTS idx_wait_events_date     ON waiting_time_events(event_date);
+CREATE INDEX IF NOT EXISTS idx_wait_events_billable ON waiting_time_events(billable) WHERE billable = true;
+
+-- ============================================================
+-- RLS
+-- ============================================================
+ALTER TABLE waiting_time_events ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Authenticated users can read waiting_time_events" ON waiting_time_events;
+CREATE POLICY "Authenticated users can read waiting_time_events"
+  ON waiting_time_events FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS "Authenticated users can insert waiting_time_events" ON waiting_time_events;
+CREATE POLICY "Authenticated users can insert waiting_time_events"
+  ON waiting_time_events FOR INSERT TO authenticated WITH CHECK (true);
+DROP POLICY IF EXISTS "Authenticated users can update waiting_time_events" ON waiting_time_events;
+CREATE POLICY "Authenticated users can update waiting_time_events"
+  ON waiting_time_events FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Authenticated users can delete waiting_time_events" ON waiting_time_events;
+CREATE POLICY "Authenticated users can delete waiting_time_events"
+  ON waiting_time_events FOR DELETE TO authenticated USING (true);
+
+-- ============================================================
+-- Auto-compute charge amounts on insert/update
+-- ============================================================
+CREATE OR REPLACE FUNCTION compute_wait_time_charges()
+RETURNS TRIGGER AS $$
+DECLARE
+  billable_minutes INT;
+  driver_payable_minutes INT;
+BEGIN
+  -- Compute duration from start/end if provided
+  IF NEW.start_time IS NOT NULL AND NEW.end_time IS NOT NULL THEN
+    NEW.duration_minutes := EXTRACT(EPOCH FROM (NEW.end_time - NEW.start_time)) / 60;
+  END IF;
+
+  -- Billing charge: only minutes beyond free time
+  billable_minutes := GREATEST(NEW.duration_minutes - COALESCE(NEW.free_time_minutes, 60), 0);
+  IF NEW.billable AND billable_minutes > 0 THEN
+    NEW.charge_amount := ROUND((billable_minutes / 60.0) * COALESCE(NEW.rate_per_hour, 75), 2);
+  ELSE
+    NEW.charge_amount := 0;
+  END IF;
+
+  -- Driver pay: full duration (drivers get paid from minute 1)
+  driver_payable_minutes := NEW.duration_minutes;
+  IF NEW.driver_payable AND driver_payable_minutes > 0 THEN
+    NEW.driver_pay_amount := ROUND((driver_payable_minutes / 60.0) * COALESCE(NEW.driver_rate_per_hour, 75), 2);
+  ELSE
+    NEW.driver_pay_amount := 0;
+  END IF;
+
+  NEW.updated_at := now();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_compute_wait_charges ON waiting_time_events;
+CREATE TRIGGER trg_compute_wait_charges
+  BEFORE INSERT OR UPDATE ON waiting_time_events
+  FOR EACH ROW EXECUTE FUNCTION compute_wait_time_charges();

@@ -1,0 +1,19 @@
+-- Enable replica identity FULL on loads table so Supabase Realtime
+-- includes the full old record in postgres_changes payloads.
+-- This is required for the status change toast notifications to reliably
+-- detect what the old status was before the update.
+ALTER TABLE loads REPLICA IDENTITY FULL;
+
+-- Also ensure the loads table is added to the Supabase Realtime publication.
+-- This is idempotent — if already added, it will be a no-op.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime'
+    AND schemaname = 'public'
+    AND tablename = 'loads'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.loads;
+  END IF;
+END $$;

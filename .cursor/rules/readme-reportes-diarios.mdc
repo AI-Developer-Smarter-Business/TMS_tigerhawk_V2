@@ -1,0 +1,10 @@
+---
+description: README_REPORTES_DIARIOS.md — no añadir fechas nuevas sin indicación del usuario
+alwaysApply: true
+---
+
+# `README_REPORTES_DIARIOS.md`
+
+- **No** crear un encabezado nuevo `## YYYY-MM-DD` salvo que el **usuario lo pida explícitamente**.
+- Para nuevo trabajo el mismo día: añadir un bloque `### Título — Tarea N` **debajo del `##` de fecha que el usuario esté usando** en ese archivo (o donde indique el usuario), separado con `---` como el resto del documento.
+- Si no hay fecha clara en contexto, **preguntar** en qué bloque de fecha deben ir las notas antes de editar.

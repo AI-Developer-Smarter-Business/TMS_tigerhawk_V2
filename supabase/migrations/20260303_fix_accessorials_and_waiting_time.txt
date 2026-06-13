@@ -1,0 +1,237 @@
+-- ============================================================
+-- Fix: Create accessorials table (missing) and add columns to
+-- existing waiting_time_events and accessorial_group_rules tables.
+-- ============================================================
+
+-- ============================================================
+-- 1. accessorials — This table is genuinely missing
+-- ============================================================
+CREATE TABLE IF NOT EXISTS accessorials (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  code            TEXT NOT NULL UNIQUE,
+  name            TEXT NOT NULL,
+  description     TEXT,
+  charge_type     TEXT NOT NULL DEFAULT 'fixed',
+  default_amount  NUMERIC(12,2),
+  trigger_type    TEXT,
+  trigger_config  JSONB,
+  container_sizes TEXT[],
+  load_types      TEXT[],
+  is_active       BOOLEAN NOT NULL DEFAULT true,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_accessorials_code     ON accessorials(code);
+CREATE INDEX IF NOT EXISTS idx_accessorials_active   ON accessorials(is_active) WHERE is_active = true;
+
+-- RLS
+ALTER TABLE accessorials ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Allow authenticated read on accessorials" ON accessorials;
+CREATE POLICY "Allow authenticated read on accessorials"
+  ON accessorials FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS "Allow authenticated insert on accessorials" ON accessorials;
+CREATE POLICY "Allow authenticated insert on accessorials"
+  ON accessorials FOR INSERT TO authenticated WITH CHECK (true);
+DROP POLICY IF EXISTS "Allow authenticated update on accessorials" ON accessorials;
+CREATE POLICY "Allow authenticated update on accessorials"
+  ON accessorials FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Allow authenticated delete on accessorials" ON accessorials;
+CREATE POLICY "Allow authenticated delete on accessorials"
+  ON accessorials FOR DELETE TO authenticated USING (true);
+
+-- updated_at trigger
+CREATE OR REPLACE FUNCTION set_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_accessorials_updated_at ON accessorials;
+CREATE TRIGGER trg_accessorials_updated_at
+  BEFORE UPDATE ON accessorials
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- ============================================================
+-- 2. Seed accessorials catalog
+-- ============================================================
+INSERT INTO accessorials (code, name, description, charge_type, default_amount, trigger_type, trigger_config) VALUES
+  ('ACC-HAZ',    'Hazmat',                'Hazardous materials surcharge',                   'fixed',     150.00,  'load_property', '{"field": "is_hazmat", "value": true}'),
+  ('ACC-OW',     'Overweight',            'Overweight container surcharge (>44,000 lbs)',    'fixed',     125.00,  'load_property', '{"field": "is_overweight", "value": true}'),
+  ('ACC-OOG',    'Out of Gauge',          'Over-dimensional / out of gauge charge',          'fixed',     200.00,  'load_property', '{"field": "is_oog", "value": true}'),
+  ('ACC-REEFER', 'Reefer',                'Refrigerated container handling',                 'fixed',      75.00,  'load_property', '{"field": "is_genset", "value": true}'),
+  ('ACC-BOND',   'Bonded Cargo',          'Bonded cargo compliance surcharge',               'fixed',      85.00,  'load_property', '{"field": "is_bonded", "value": true}'),
+  ('ACC-TANK',   'Tanker Endorsement',    'Tanker endorsement required surcharge',           'fixed',      65.00,  'load_property', '{"field": "is_tanker", "value": true}'),
+  ('ACC-SCALE',  'Scale Load',            'Scale ticket and weigh station charge',           'fixed',      35.00,  'load_property', '{"field": "is_scale", "value": true}'),
+  ('ACC-LIQ',    'Liquor',                'Liquor shipment additional handling',             'fixed',      50.00,  'load_property', '{"field": "is_liquor", "value": true}'),
+  ('ACC-HOT',    'Hot Load / Priority',   'Expedited/priority load surcharge',               'fixed',      75.00,  'load_property', '{"field": "is_hot", "value": true}'),
+  ('ACC-OH',     'Overheight',            'Overheight container requiring permits',          'fixed',     175.00,  'load_property', '{"field": "is_overheight", "value": true}'),
+  ('ACC-ST',     'Street Turn',           'Street turn handling fee',                        'fixed',      50.00,  'load_property', '{"field": "is_street_turn", "value": true}'),
+  ('ACC-EV',     'EV Surcharge',          'Electric vehicle drayage premium',                'fixed',       0.00,  'load_property', '{"field": "is_ev", "value": true}'),
+  ('ACC-DET',    'Detention',             'Waiting time beyond free time at pickup/delivery', 'per_hour',  75.00,  'event_threshold','{"field": "detention_hours", "operator": ">", "threshold": 1}'),
+  ('ACC-WAIT',   'Wait Time',             'Driver wait time charge (per hour)',               'per_hour',  75.00,  'event_threshold','{"field": "wait_time_hours", "operator": ">", "threshold": 0}'),
+  ('ACC-DEM',    'Demurrage',             'Container demurrage at terminal',                 'fixed',     150.00,  'event_threshold','{"field": "demurrage_days", "operator": ">", "threshold": 0}'),
+  ('ACC-PERDIEM','Per Diem',              'Equipment per diem charges',                      'fixed',     100.00,  'event_threshold','{"field": "per_diem_days", "operator": ">", "threshold": 0}'),
+  ('ACC-DRYRUN', 'Dry Run',              'Truck dispatched but load cancelled/unavailable',  'fixed',     150.00,  'manual',        NULL),
+  ('ACC-PREPULL','Pre-Pull',             'Container pre-pulled to yard before delivery',     'fixed',     125.00,  'manual',        NULL),
+  ('ACC-FLIP',   'Flip / Chassis Swap',  'Chassis flip or swap charge',                     'fixed',      85.00,  'manual',        NULL),
+  ('ACC-DROP',   'Drop Charge',          'Container drop at location',                      'fixed',      75.00,  'manual',        NULL),
+  ('ACC-STOP',   'Stop Off',             'Additional stop en route',                        'fixed',      95.00,  'manual',        NULL),
+  ('ACC-TOLLS',  'Tolls',                'Road toll reimbursement',                         'fixed',       0.00,  'manual',        NULL),
+  ('ACC-LUMPER', 'Lumper',               'Loading/unloading labor charge',                  'fixed',       0.00,  'manual',        NULL),
+  ('ACC-BOBTAIL','Bobtail',              'Bobtail move (tractor only, no container)',       'fixed',      95.00,  'manual',        NULL),
+  ('ACC-TARP',   'Tarp',                 'Tarping charge for flatbed/open-top',             'fixed',      85.00,  'manual',        NULL),
+  ('ACC-PIER',   'Pier/Port Congestion', 'Congestion surcharge at port/pier',               'fixed',      50.00,  'manual',        NULL),
+  ('ACC-SAT',    'Saturday Delivery',    'Weekend/Saturday delivery surcharge',              'fixed',     100.00,  'manual',        NULL),
+  ('ACC-REDELIVERY','Redelivery',        'Failed first delivery, return attempt',            'fixed',     175.00,  'manual',        NULL)
+ON CONFLICT (code) DO NOTHING;
+
+-- ============================================================
+-- 3. accessorial_group_rules — already exists, add group_id alias
+--    if the table uses driver_group_id instead of group_id.
+--    The API code references "group_id" so we need that column.
+-- ============================================================
+-- Add group_id as an alias column if it doesn't exist
+-- (the existing table likely has driver_group_id)
+DO $$
+BEGIN
+  -- Check if group_id column exists
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'accessorial_group_rules' AND column_name = 'group_id'
+  ) THEN
+    -- Check if driver_group_id exists (the likely actual column)
+    IF EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_name = 'accessorial_group_rules' AND column_name = 'driver_group_id'
+    ) THEN
+      -- Rename driver_group_id to group_id to match API code
+      ALTER TABLE accessorial_group_rules RENAME COLUMN driver_group_id TO group_id;
+    END IF;
+  END IF;
+END $$;
+
+-- ============================================================
+-- 4. waiting_time_events — already exists, add missing columns
+-- ============================================================
+-- Add columns that our new schema needs but the existing table lacks
+DO $$
+BEGIN
+  -- event_date
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'waiting_time_events' AND column_name = 'event_date'
+  ) THEN
+    ALTER TABLE waiting_time_events ADD COLUMN event_date TIMESTAMPTZ NOT NULL DEFAULT now();
+  END IF;
+
+  -- start_time
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'waiting_time_events' AND column_name = 'start_time'
+  ) THEN
+    ALTER TABLE waiting_time_events ADD COLUMN start_time TIMESTAMPTZ;
+  END IF;
+
+  -- end_time
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'waiting_time_events' AND column_name = 'end_time'
+  ) THEN
+    ALTER TABLE waiting_time_events ADD COLUMN end_time TIMESTAMPTZ;
+  END IF;
+
+  -- location
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'waiting_time_events' AND column_name = 'location'
+  ) THEN
+    ALTER TABLE waiting_time_events ADD COLUMN location TEXT;
+  END IF;
+
+  -- free_time_minutes
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'waiting_time_events' AND column_name = 'free_time_minutes'
+  ) THEN
+    ALTER TABLE waiting_time_events ADD COLUMN free_time_minutes INT DEFAULT 60;
+  END IF;
+
+  -- driver_payable
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'waiting_time_events' AND column_name = 'driver_payable'
+  ) THEN
+    ALTER TABLE waiting_time_events ADD COLUMN driver_payable BOOLEAN NOT NULL DEFAULT true;
+  END IF;
+
+  -- driver_rate_per_hour
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'waiting_time_events' AND column_name = 'driver_rate_per_hour'
+  ) THEN
+    ALTER TABLE waiting_time_events ADD COLUMN driver_rate_per_hour NUMERIC(10,2) DEFAULT 75.00;
+  END IF;
+
+  -- driver_pay_amount
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'waiting_time_events' AND column_name = 'driver_pay_amount'
+  ) THEN
+    ALTER TABLE waiting_time_events ADD COLUMN driver_pay_amount NUMERIC(12,2) DEFAULT 0;
+  END IF;
+
+  -- logged_by
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'waiting_time_events' AND column_name = 'logged_by'
+  ) THEN
+    ALTER TABLE waiting_time_events ADD COLUMN logged_by TEXT;
+  END IF;
+END $$;
+
+-- Indexes on new columns
+CREATE INDEX IF NOT EXISTS idx_wait_events_event_date ON waiting_time_events(event_date);
+
+-- ============================================================
+-- 5. Auto-compute wait time charge amounts trigger
+-- ============================================================
+CREATE OR REPLACE FUNCTION compute_wait_time_charges()
+RETURNS TRIGGER AS $$
+DECLARE
+  billable_minutes INT;
+  driver_payable_minutes INT;
+BEGIN
+  -- Compute duration from start/end if provided
+  IF NEW.start_time IS NOT NULL AND NEW.end_time IS NOT NULL THEN
+    NEW.duration_minutes := EXTRACT(EPOCH FROM (NEW.end_time - NEW.start_time)) / 60;
+  END IF;
+
+  -- Billing charge: only minutes beyond free time
+  billable_minutes := GREATEST(COALESCE(NEW.duration_minutes, 0) - COALESCE(NEW.free_time_minutes, 60), 0);
+  IF NEW.billable AND billable_minutes > 0 THEN
+    NEW.charge_amount := ROUND((billable_minutes / 60.0) * COALESCE(NEW.rate_per_hour, 75), 2);
+  ELSE
+    NEW.charge_amount := COALESCE(NEW.charge_amount, 0);
+  END IF;
+
+  -- Driver pay: full duration (drivers get paid from minute 1)
+  driver_payable_minutes := COALESCE(NEW.duration_minutes, 0);
+  IF NEW.driver_payable AND driver_payable_minutes > 0 THEN
+    NEW.driver_pay_amount := ROUND((driver_payable_minutes / 60.0) * COALESCE(NEW.driver_rate_per_hour, 75), 2);
+  ELSE
+    NEW.driver_pay_amount := COALESCE(NEW.driver_pay_amount, 0);
+  END IF;
+
+  NEW.updated_at := now();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_compute_wait_charges ON waiting_time_events;
+CREATE TRIGGER trg_compute_wait_charges
+  BEFORE INSERT OR UPDATE ON waiting_time_events
+  FOR EACH ROW EXECUTE FUNCTION compute_wait_time_charges();

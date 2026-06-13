@@ -1,0 +1,827 @@
+-- ============================================================
+-- RLS Audit Hardening Migration
+-- 2026-03-02
+-- ============================================================
+-- All DROP POLICY IF EXISTS for full idempotency (safe to re-run).
+--
+-- This migration addresses two categories of RLS issues:
+--
+-- 1. TABLES MISSING RLS ENTIRELY
+--    Tables created via Supabase dashboard that were never given
+--    ENABLE ROW LEVEL SECURITY or had only dashboard-created policies.
+--
+-- 2. WEAK "authenticated = full access" POLICIES
+--    AR/AP, config, and audit tables currently use USING (true)
+--    for all authenticated users. We tighten to role-based policies.
+--
+-- Pattern used:
+--   (select get_user_role()) — cached once per query
+--   (select auth.uid())      — cached once per query
+--   Staff (read) = admin, dispatcher, accounting
+--   Financial (write) = admin, accounting
+-- ============================================================
+
+
+-- ============================================================
+-- SECTION 1: Enable RLS on tables that may have been created
+-- via Supabase dashboard. Drop any existing policies first.
+-- ============================================================
+
+-- trucks (used by equipment page, managed by admin/dispatcher)
+ALTER TABLE trucks ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Staff read trucks" ON trucks;
+DROP POLICY IF EXISTS "Admin insert trucks" ON trucks;
+DROP POLICY IF EXISTS "Admin update trucks" ON trucks;
+DROP POLICY IF EXISTS "Admin delete trucks" ON trucks;
+-- Also drop common dashboard-generated policy names
+DROP POLICY IF EXISTS "Enable read access for authenticated users" ON trucks;
+DROP POLICY IF EXISTS "Enable insert for authenticated users only" ON trucks;
+DROP POLICY IF EXISTS "Enable update for authenticated users only" ON trucks;
+DROP POLICY IF EXISTS "Enable delete for authenticated users only" ON trucks;
+DROP POLICY IF EXISTS "Staff read all trucks" ON trucks;
+DROP POLICY IF EXISTS "Staff update trucks" ON trucks;
+DROP POLICY IF EXISTS "Staff insert trucks" ON trucks;
+DROP POLICY IF EXISTS "Staff delete trucks" ON trucks;
+
+CREATE POLICY "Staff read trucks"
+  ON trucks FOR SELECT TO authenticated
+  USING ((select get_user_role()) IN ('admin', 'dispatcher', 'accounting'));
+
+CREATE POLICY "Admin insert trucks"
+  ON trucks FOR INSERT TO authenticated
+  WITH CHECK ((select get_user_role()) IN ('admin', 'dispatcher'));
+
+CREATE POLICY "Admin update trucks"
+  ON trucks FOR UPDATE TO authenticated
+  USING ((select get_user_role()) IN ('admin', 'dispatcher'))
+  WITH CHECK ((select get_user_role()) IN ('admin', 'dispatcher'));
+
+CREATE POLICY "Admin delete trucks"
+  ON trucks FOR DELETE TO authenticated
+  USING ((select get_user_role()) = 'admin');
+
+
+-- chassis (used by equipment page)
+ALTER TABLE chassis ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Staff read chassis" ON chassis;
+DROP POLICY IF EXISTS "Staff insert chassis" ON chassis;
+DROP POLICY IF EXISTS "Staff update chassis" ON chassis;
+DROP POLICY IF EXISTS "Admin delete chassis" ON chassis;
+DROP POLICY IF EXISTS "Enable read access for authenticated users" ON chassis;
+DROP POLICY IF EXISTS "Enable insert for authenticated users only" ON chassis;
+DROP POLICY IF EXISTS "Enable update for authenticated users only" ON chassis;
+DROP POLICY IF EXISTS "Enable delete for authenticated users only" ON chassis;
+DROP POLICY IF EXISTS "Staff read all chassis" ON chassis;
+DROP POLICY IF EXISTS "Staff update chassis" ON chassis;
+
+CREATE POLICY "Staff read chassis"
+  ON chassis FOR SELECT TO authenticated
+  USING ((select get_user_role()) IN ('admin', 'dispatcher', 'accounting'));
+
+CREATE POLICY "Staff insert chassis"
+  ON chassis FOR INSERT TO authenticated
+  WITH CHECK ((select get_user_role()) IN ('admin', 'dispatcher'));
+
+CREATE POLICY "Staff update chassis"
+  ON chassis FOR UPDATE TO authenticated
+  USING ((select get_user_role()) IN ('admin', 'dispatcher'))
+  WITH CHECK ((select get_user_role()) IN ('admin', 'dispatcher'));
+
+CREATE POLICY "Admin delete chassis"
+  ON chassis FOR DELETE TO authenticated
+  USING ((select get_user_role()) = 'admin');
+
+
+-- containers (heavily used — dispatcher, port houston, dashboard, search)
+-- Note: customer portal policy from 20260228_customer_portal.sql is preserved
+ALTER TABLE containers ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Staff read containers" ON containers;
+DROP POLICY IF EXISTS "Drivers read assigned containers" ON containers;
+DROP POLICY IF EXISTS "Staff insert containers" ON containers;
+DROP POLICY IF EXISTS "Staff update containers" ON containers;
+DROP POLICY IF EXISTS "Admin delete containers" ON containers;
+DROP POLICY IF EXISTS "Enable read access for authenticated users" ON containers;
+DROP POLICY IF EXISTS "Enable insert for authenticated users only" ON containers;
+DROP POLICY IF EXISTS "Enable update for authenticated users only" ON containers;
+DROP POLICY IF EXISTS "Enable delete for authenticated users only" ON containers;
+DROP POLICY IF EXISTS "Staff read all containers" ON containers;
+DROP POLICY IF EXISTS "Staff update containers" ON containers;
+DROP POLICY IF EXISTS "Admin full access on containers" ON containers;
+DROP POLICY IF EXISTS "Dispatcher read containers" ON containers;
+
+CREATE POLICY "Staff read containers"
+  ON containers FOR SELECT TO authenticated
+  USING ((select get_user_role()) IN ('admin', 'dispatcher', 'accounting'));
+
+CREATE POLICY "Drivers read assigned containers"
+  ON containers FOR SELECT TO authenticated
+  USING (
+    (select get_user_role()) = 'driver'
+    AND id IN (
+      SELECT container_id FROM loads
+      WHERE driver_id = (select auth.uid())
+        AND container_id IS NOT NULL
+    )
+  );
+
+CREATE POLICY "Staff insert containers"
+  ON containers FOR INSERT TO authenticated
+  WITH CHECK ((select get_user_role()) IN ('admin', 'dispatcher'));
+
+CREATE POLICY "Staff update containers"
+  ON containers FOR UPDATE TO authenticated
+  USING ((select get_user_role()) IN ('admin', 'dispatcher'))
+  WITH CHECK ((select get_user_role()) IN ('admin', 'dispatcher'));
+
+CREATE POLICY "Admin delete containers"
+  ON containers FOR DELETE TO authenticated
+  USING ((select get_user_role()) = 'admin');
+
+
+-- vessels (used by dashboard, port houston, notifications, search)
+-- Note: customer portal policy from 20260228_customer_portal.sql is preserved
+ALTER TABLE vessels ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Staff read vessels" ON vessels;
+DROP POLICY IF EXISTS "Staff insert vessels" ON vessels;
+DROP POLICY IF EXISTS "Staff update vessels" ON vessels;
+DROP POLICY IF EXISTS "Admin delete vessels" ON vessels;
+DROP POLICY IF EXISTS "Enable read access for authenticated users" ON vessels;
+DROP POLICY IF EXISTS "Enable insert for authenticated users only" ON vessels;
+DROP POLICY IF EXISTS "Enable update for authenticated users only" ON vessels;
+DROP POLICY IF EXISTS "Enable delete for authenticated users only" ON vessels;
+DROP POLICY IF EXISTS "Staff read all vessels" ON vessels;
+DROP POLICY IF EXISTS "Admin full access on vessels" ON vessels;
+DROP POLICY IF EXISTS "Dispatcher read vessels" ON vessels;
+
+CREATE POLICY "Staff read vessels"
+  ON vessels FOR SELECT TO authenticated
+  USING ((select get_user_role()) IN ('admin', 'dispatcher', 'accounting'));
+
+CREATE POLICY "Staff insert vessels"
+  ON vessels FOR INSERT TO authenticated
+  WITH CHECK ((select get_user_role()) IN ('admin', 'dispatcher'));
+
+CREATE POLICY "Staff update vessels"
+  ON vessels FOR UPDATE TO authenticated
+  USING ((select get_user_role()) IN ('admin', 'dispatcher'))
+  WITH CHECK ((select get_user_role()) IN ('admin', 'dispatcher'));
+
+CREATE POLICY "Admin delete vessels"
+  ON vessels FOR DELETE TO authenticated
+  USING ((select get_user_role()) = 'admin');
+
+
+-- warehouse_inventory (referenced in dashboard warehouse module)
+-- Only create if table exists (may not be in all environments)
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'warehouse_inventory' AND table_schema = 'public') THEN
+    EXECUTE 'ALTER TABLE warehouse_inventory ENABLE ROW LEVEL SECURITY';
+    EXECUTE 'DROP POLICY IF EXISTS "Staff read warehouse_inventory" ON warehouse_inventory';
+    EXECUTE 'DROP POLICY IF EXISTS "Staff insert warehouse_inventory" ON warehouse_inventory';
+    EXECUTE 'DROP POLICY IF EXISTS "Staff update warehouse_inventory" ON warehouse_inventory';
+    EXECUTE 'DROP POLICY IF EXISTS "Admin delete warehouse_inventory" ON warehouse_inventory';
+    EXECUTE 'DROP POLICY IF EXISTS "Staff manage warehouse_inventory" ON warehouse_inventory';
+    EXECUTE 'DROP POLICY IF EXISTS "Enable read access for authenticated users" ON warehouse_inventory';
+
+    EXECUTE $policy$
+      CREATE POLICY "Staff read warehouse_inventory"
+        ON warehouse_inventory FOR SELECT TO authenticated
+        USING ((select get_user_role()) IN ('admin', 'dispatcher', 'accounting'))
+    $policy$;
+
+    EXECUTE $policy$
+      CREATE POLICY "Staff insert warehouse_inventory"
+        ON warehouse_inventory FOR INSERT TO authenticated
+        WITH CHECK ((select get_user_role()) IN ('admin', 'dispatcher'))
+    $policy$;
+
+    EXECUTE $policy$
+      CREATE POLICY "Staff update warehouse_inventory"
+        ON warehouse_inventory FOR UPDATE TO authenticated
+        USING ((select get_user_role()) IN ('admin', 'dispatcher'))
+        WITH CHECK ((select get_user_role()) IN ('admin', 'dispatcher'))
+    $policy$;
+
+    EXECUTE $policy$
+      CREATE POLICY "Admin delete warehouse_inventory"
+        ON warehouse_inventory FOR DELETE TO authenticated
+        USING ((select get_user_role()) = 'admin')
+    $policy$;
+  END IF;
+END $$;
+
+
+-- ============================================================
+-- SECTION 2: Tighten AR/AP tables from "any authenticated" to
+-- role-based access (staff read, financial write)
+-- ============================================================
+
+-- ----- ap_deductions -----
+DROP POLICY IF EXISTS "Authenticated users can read ap_deductions" ON ap_deductions;
+DROP POLICY IF EXISTS "Authenticated users can insert ap_deductions" ON ap_deductions;
+DROP POLICY IF EXISTS "Authenticated users can update ap_deductions" ON ap_deductions;
+DROP POLICY IF EXISTS "Authenticated users can delete ap_deductions" ON ap_deductions;
+DROP POLICY IF EXISTS "Staff read ap_deductions" ON ap_deductions;
+DROP POLICY IF EXISTS "Financial staff insert ap_deductions" ON ap_deductions;
+DROP POLICY IF EXISTS "Financial staff update ap_deductions" ON ap_deductions;
+DROP POLICY IF EXISTS "Financial staff delete ap_deductions" ON ap_deductions;
+
+CREATE POLICY "Staff read ap_deductions"
+  ON ap_deductions FOR SELECT TO authenticated
+  USING ((select get_user_role()) IN ('admin', 'dispatcher', 'accounting'));
+
+CREATE POLICY "Financial staff insert ap_deductions"
+  ON ap_deductions FOR INSERT TO authenticated
+  WITH CHECK ((select get_user_role()) IN ('admin', 'accounting'));
+
+CREATE POLICY "Financial staff update ap_deductions"
+  ON ap_deductions FOR UPDATE TO authenticated
+  USING ((select get_user_role()) IN ('admin', 'accounting'))
+  WITH CHECK ((select get_user_role()) IN ('admin', 'accounting'));
+
+CREATE POLICY "Financial staff delete ap_deductions"
+  ON ap_deductions FOR DELETE TO authenticated
+  USING ((select get_user_role()) IN ('admin', 'accounting'));
+
+
+-- ----- ap_driver_pay -----
+DROP POLICY IF EXISTS "Authenticated users can read ap_driver_pay" ON ap_driver_pay;
+DROP POLICY IF EXISTS "Authenticated users can insert ap_driver_pay" ON ap_driver_pay;
+DROP POLICY IF EXISTS "Authenticated users can update ap_driver_pay" ON ap_driver_pay;
+DROP POLICY IF EXISTS "Authenticated users can delete ap_driver_pay" ON ap_driver_pay;
+DROP POLICY IF EXISTS "Staff read ap_driver_pay" ON ap_driver_pay;
+DROP POLICY IF EXISTS "Financial staff insert ap_driver_pay" ON ap_driver_pay;
+DROP POLICY IF EXISTS "Financial staff update ap_driver_pay" ON ap_driver_pay;
+DROP POLICY IF EXISTS "Financial staff delete ap_driver_pay" ON ap_driver_pay;
+
+CREATE POLICY "Staff read ap_driver_pay"
+  ON ap_driver_pay FOR SELECT TO authenticated
+  USING ((select get_user_role()) IN ('admin', 'dispatcher', 'accounting'));
+
+CREATE POLICY "Financial staff insert ap_driver_pay"
+  ON ap_driver_pay FOR INSERT TO authenticated
+  WITH CHECK ((select get_user_role()) IN ('admin', 'accounting'));
+
+CREATE POLICY "Financial staff update ap_driver_pay"
+  ON ap_driver_pay FOR UPDATE TO authenticated
+  USING ((select get_user_role()) IN ('admin', 'accounting'))
+  WITH CHECK ((select get_user_role()) IN ('admin', 'accounting'));
+
+CREATE POLICY "Financial staff delete ap_driver_pay"
+  ON ap_driver_pay FOR DELETE TO authenticated
+  USING ((select get_user_role()) IN ('admin', 'accounting'));
+
+
+-- ----- ap_dynamic_expenses -----
+DROP POLICY IF EXISTS "Authenticated users can read ap_dynamic_expenses" ON ap_dynamic_expenses;
+DROP POLICY IF EXISTS "Authenticated users can insert ap_dynamic_expenses" ON ap_dynamic_expenses;
+DROP POLICY IF EXISTS "Authenticated users can update ap_dynamic_expenses" ON ap_dynamic_expenses;
+DROP POLICY IF EXISTS "Authenticated users can delete ap_dynamic_expenses" ON ap_dynamic_expenses;
+DROP POLICY IF EXISTS "Staff read ap_dynamic_expenses" ON ap_dynamic_expenses;
+DROP POLICY IF EXISTS "Financial staff insert ap_dynamic_expenses" ON ap_dynamic_expenses;
+DROP POLICY IF EXISTS "Financial staff update ap_dynamic_expenses" ON ap_dynamic_expenses;
+DROP POLICY IF EXISTS "Financial staff delete ap_dynamic_expenses" ON ap_dynamic_expenses;
+
+CREATE POLICY "Staff read ap_dynamic_expenses"
+  ON ap_dynamic_expenses FOR SELECT TO authenticated
+  USING ((select get_user_role()) IN ('admin', 'dispatcher', 'accounting'));
+
+CREATE POLICY "Financial staff insert ap_dynamic_expenses"
+  ON ap_dynamic_expenses FOR INSERT TO authenticated
+  WITH CHECK ((select get_user_role()) IN ('admin', 'accounting'));
+
+CREATE POLICY "Financial staff update ap_dynamic_expenses"
+  ON ap_dynamic_expenses FOR UPDATE TO authenticated
+  USING ((select get_user_role()) IN ('admin', 'accounting'))
+  WITH CHECK ((select get_user_role()) IN ('admin', 'accounting'));
+
+CREATE POLICY "Financial staff delete ap_dynamic_expenses"
+  ON ap_dynamic_expenses FOR DELETE TO authenticated
+  USING ((select get_user_role()) IN ('admin', 'accounting'));
+
+
+-- ----- ap_settlements -----
+DROP POLICY IF EXISTS "Authenticated users can read ap_settlements" ON ap_settlements;
+DROP POLICY IF EXISTS "Authenticated users can insert ap_settlements" ON ap_settlements;
+DROP POLICY IF EXISTS "Authenticated users can update ap_settlements" ON ap_settlements;
+DROP POLICY IF EXISTS "Authenticated users can delete ap_settlements" ON ap_settlements;
+DROP POLICY IF EXISTS "Staff read ap_settlements" ON ap_settlements;
+DROP POLICY IF EXISTS "Financial staff insert ap_settlements" ON ap_settlements;
+DROP POLICY IF EXISTS "Financial staff update ap_settlements" ON ap_settlements;
+DROP POLICY IF EXISTS "Financial staff delete ap_settlements" ON ap_settlements;
+
+CREATE POLICY "Staff read ap_settlements"
+  ON ap_settlements FOR SELECT TO authenticated
+  USING ((select get_user_role()) IN ('admin', 'dispatcher', 'accounting'));
+
+CREATE POLICY "Financial staff insert ap_settlements"
+  ON ap_settlements FOR INSERT TO authenticated
+  WITH CHECK ((select get_user_role()) IN ('admin', 'accounting'));
+
+CREATE POLICY "Financial staff update ap_settlements"
+  ON ap_settlements FOR UPDATE TO authenticated
+  USING ((select get_user_role()) IN ('admin', 'accounting'))
+  WITH CHECK ((select get_user_role()) IN ('admin', 'accounting'));
+
+CREATE POLICY "Financial staff delete ap_settlements"
+  ON ap_settlements FOR DELETE TO authenticated
+  USING ((select get_user_role()) IN ('admin', 'accounting'));
+
+
+-- ----- ar_invoices -----
+DROP POLICY IF EXISTS "Authenticated users can read ar_invoices" ON ar_invoices;
+DROP POLICY IF EXISTS "Authenticated users can insert ar_invoices" ON ar_invoices;
+DROP POLICY IF EXISTS "Authenticated users can update ar_invoices" ON ar_invoices;
+DROP POLICY IF EXISTS "Authenticated users can delete ar_invoices" ON ar_invoices;
+DROP POLICY IF EXISTS "Staff read ar_invoices" ON ar_invoices;
+DROP POLICY IF EXISTS "Customers read own invoices" ON ar_invoices;
+DROP POLICY IF EXISTS "Financial staff insert ar_invoices" ON ar_invoices;
+DROP POLICY IF EXISTS "Financial staff update ar_invoices" ON ar_invoices;
+DROP POLICY IF EXISTS "Financial staff delete ar_invoices" ON ar_invoices;
+
+CREATE POLICY "Staff read ar_invoices"
+  ON ar_invoices FOR SELECT TO authenticated
+  USING ((select get_user_role()) IN ('admin', 'dispatcher', 'accounting'));
+
+CREATE POLICY "Customers read own invoices"
+  ON ar_invoices FOR SELECT TO authenticated
+  USING (
+    (select get_user_role()) = 'customer'
+    AND customer_id = (select get_user_customer_id())
+  );
+
+CREATE POLICY "Financial staff insert ar_invoices"
+  ON ar_invoices FOR INSERT TO authenticated
+  WITH CHECK ((select get_user_role()) IN ('admin', 'accounting'));
+
+CREATE POLICY "Financial staff update ar_invoices"
+  ON ar_invoices FOR UPDATE TO authenticated
+  USING ((select get_user_role()) IN ('admin', 'accounting'))
+  WITH CHECK ((select get_user_role()) IN ('admin', 'accounting'));
+
+CREATE POLICY "Financial staff delete ar_invoices"
+  ON ar_invoices FOR DELETE TO authenticated
+  USING ((select get_user_role()) IN ('admin', 'accounting'));
+
+
+-- ----- ar_invoice_lines -----
+DROP POLICY IF EXISTS "Authenticated users can read ar_invoice_lines" ON ar_invoice_lines;
+DROP POLICY IF EXISTS "Authenticated users can insert ar_invoice_lines" ON ar_invoice_lines;
+DROP POLICY IF EXISTS "Authenticated users can update ar_invoice_lines" ON ar_invoice_lines;
+DROP POLICY IF EXISTS "Authenticated users can delete ar_invoice_lines" ON ar_invoice_lines;
+DROP POLICY IF EXISTS "Staff read ar_invoice_lines" ON ar_invoice_lines;
+DROP POLICY IF EXISTS "Financial staff insert ar_invoice_lines" ON ar_invoice_lines;
+DROP POLICY IF EXISTS "Financial staff update ar_invoice_lines" ON ar_invoice_lines;
+DROP POLICY IF EXISTS "Financial staff delete ar_invoice_lines" ON ar_invoice_lines;
+
+CREATE POLICY "Staff read ar_invoice_lines"
+  ON ar_invoice_lines FOR SELECT TO authenticated
+  USING ((select get_user_role()) IN ('admin', 'dispatcher', 'accounting'));
+
+CREATE POLICY "Financial staff insert ar_invoice_lines"
+  ON ar_invoice_lines FOR INSERT TO authenticated
+  WITH CHECK ((select get_user_role()) IN ('admin', 'accounting'));
+
+CREATE POLICY "Financial staff update ar_invoice_lines"
+  ON ar_invoice_lines FOR UPDATE TO authenticated
+  USING ((select get_user_role()) IN ('admin', 'accounting'))
+  WITH CHECK ((select get_user_role()) IN ('admin', 'accounting'));
+
+CREATE POLICY "Financial staff delete ar_invoice_lines"
+  ON ar_invoice_lines FOR DELETE TO authenticated
+  USING ((select get_user_role()) IN ('admin', 'accounting'));
+
+
+-- ----- ar_credit_memos -----
+DROP POLICY IF EXISTS "Authenticated users can read ar_credit_memos" ON ar_credit_memos;
+DROP POLICY IF EXISTS "Authenticated users can insert ar_credit_memos" ON ar_credit_memos;
+DROP POLICY IF EXISTS "Authenticated users can update ar_credit_memos" ON ar_credit_memos;
+DROP POLICY IF EXISTS "Authenticated users can delete ar_credit_memos" ON ar_credit_memos;
+DROP POLICY IF EXISTS "Staff read ar_credit_memos" ON ar_credit_memos;
+DROP POLICY IF EXISTS "Financial staff insert ar_credit_memos" ON ar_credit_memos;
+DROP POLICY IF EXISTS "Financial staff update ar_credit_memos" ON ar_credit_memos;
+DROP POLICY IF EXISTS "Financial staff delete ar_credit_memos" ON ar_credit_memos;
+
+CREATE POLICY "Staff read ar_credit_memos"
+  ON ar_credit_memos FOR SELECT TO authenticated
+  USING ((select get_user_role()) IN ('admin', 'dispatcher', 'accounting'));
+
+CREATE POLICY "Financial staff insert ar_credit_memos"
+  ON ar_credit_memos FOR INSERT TO authenticated
+  WITH CHECK ((select get_user_role()) IN ('admin', 'accounting'));
+
+CREATE POLICY "Financial staff update ar_credit_memos"
+  ON ar_credit_memos FOR UPDATE TO authenticated
+  USING ((select get_user_role()) IN ('admin', 'accounting'))
+  WITH CHECK ((select get_user_role()) IN ('admin', 'accounting'));
+
+CREATE POLICY "Financial staff delete ar_credit_memos"
+  ON ar_credit_memos FOR DELETE TO authenticated
+  USING ((select get_user_role()) IN ('admin', 'accounting'));
+
+
+-- ----- ar_payments -----
+DROP POLICY IF EXISTS "Authenticated users can read ar_payments" ON ar_payments;
+DROP POLICY IF EXISTS "Authenticated users can insert ar_payments" ON ar_payments;
+DROP POLICY IF EXISTS "Authenticated users can update ar_payments" ON ar_payments;
+DROP POLICY IF EXISTS "Authenticated users can delete ar_payments" ON ar_payments;
+DROP POLICY IF EXISTS "Staff read ar_payments" ON ar_payments;
+DROP POLICY IF EXISTS "Financial staff insert ar_payments" ON ar_payments;
+DROP POLICY IF EXISTS "Financial staff update ar_payments" ON ar_payments;
+DROP POLICY IF EXISTS "Financial staff delete ar_payments" ON ar_payments;
+
+CREATE POLICY "Staff read ar_payments"
+  ON ar_payments FOR SELECT TO authenticated
+  USING ((select get_user_role()) IN ('admin', 'dispatcher', 'accounting'));
+
+CREATE POLICY "Financial staff insert ar_payments"
+  ON ar_payments FOR INSERT TO authenticated
+  WITH CHECK ((select get_user_role()) IN ('admin', 'accounting'));
+
+CREATE POLICY "Financial staff update ar_payments"
+  ON ar_payments FOR UPDATE TO authenticated
+  USING ((select get_user_role()) IN ('admin', 'accounting'))
+  WITH CHECK ((select get_user_role()) IN ('admin', 'accounting'));
+
+CREATE POLICY "Financial staff delete ar_payments"
+  ON ar_payments FOR DELETE TO authenticated
+  USING ((select get_user_role()) IN ('admin', 'accounting'));
+
+
+-- ----- ar_payment_applications -----
+DROP POLICY IF EXISTS "Authenticated users can read ar_payment_applications" ON ar_payment_applications;
+DROP POLICY IF EXISTS "Authenticated users can insert ar_payment_applications" ON ar_payment_applications;
+DROP POLICY IF EXISTS "Authenticated users can update ar_payment_applications" ON ar_payment_applications;
+DROP POLICY IF EXISTS "Authenticated users can delete ar_payment_applications" ON ar_payment_applications;
+DROP POLICY IF EXISTS "Staff read ar_payment_applications" ON ar_payment_applications;
+DROP POLICY IF EXISTS "Financial staff insert ar_payment_applications" ON ar_payment_applications;
+DROP POLICY IF EXISTS "Financial staff update ar_payment_applications" ON ar_payment_applications;
+DROP POLICY IF EXISTS "Financial staff delete ar_payment_applications" ON ar_payment_applications;
+
+CREATE POLICY "Staff read ar_payment_applications"
+  ON ar_payment_applications FOR SELECT TO authenticated
+  USING ((select get_user_role()) IN ('admin', 'dispatcher', 'accounting'));
+
+CREATE POLICY "Financial staff insert ar_payment_applications"
+  ON ar_payment_applications FOR INSERT TO authenticated
+  WITH CHECK ((select get_user_role()) IN ('admin', 'accounting'));
+
+CREATE POLICY "Financial staff update ar_payment_applications"
+  ON ar_payment_applications FOR UPDATE TO authenticated
+  USING ((select get_user_role()) IN ('admin', 'accounting'))
+  WITH CHECK ((select get_user_role()) IN ('admin', 'accounting'));
+
+CREATE POLICY "Financial staff delete ar_payment_applications"
+  ON ar_payment_applications FOR DELETE TO authenticated
+  USING ((select get_user_role()) IN ('admin', 'accounting'));
+
+
+-- ============================================================
+-- SECTION 3: Tighten config/template tables
+-- ============================================================
+
+-- ----- deduction_templates -----
+DROP POLICY IF EXISTS "Authenticated users can read deduction_templates" ON deduction_templates;
+DROP POLICY IF EXISTS "Authenticated users can insert deduction_templates" ON deduction_templates;
+DROP POLICY IF EXISTS "Authenticated users can update deduction_templates" ON deduction_templates;
+DROP POLICY IF EXISTS "Authenticated users can delete deduction_templates" ON deduction_templates;
+DROP POLICY IF EXISTS "Staff read deduction_templates" ON deduction_templates;
+DROP POLICY IF EXISTS "Admin insert deduction_templates" ON deduction_templates;
+DROP POLICY IF EXISTS "Admin update deduction_templates" ON deduction_templates;
+DROP POLICY IF EXISTS "Admin delete deduction_templates" ON deduction_templates;
+
+CREATE POLICY "Staff read deduction_templates"
+  ON deduction_templates FOR SELECT TO authenticated
+  USING ((select get_user_role()) IN ('admin', 'dispatcher', 'accounting'));
+
+CREATE POLICY "Admin insert deduction_templates"
+  ON deduction_templates FOR INSERT TO authenticated
+  WITH CHECK ((select get_user_role()) IN ('admin', 'accounting'));
+
+CREATE POLICY "Admin update deduction_templates"
+  ON deduction_templates FOR UPDATE TO authenticated
+  USING ((select get_user_role()) IN ('admin', 'accounting'))
+  WITH CHECK ((select get_user_role()) IN ('admin', 'accounting'));
+
+CREATE POLICY "Admin delete deduction_templates"
+  ON deduction_templates FOR DELETE TO authenticated
+  USING ((select get_user_role()) = 'admin');
+
+
+-- ----- driver_deduction_settings -----
+DROP POLICY IF EXISTS "Authenticated users can read driver_deduction_settings" ON driver_deduction_settings;
+DROP POLICY IF EXISTS "Authenticated users can insert driver_deduction_settings" ON driver_deduction_settings;
+DROP POLICY IF EXISTS "Authenticated users can update driver_deduction_settings" ON driver_deduction_settings;
+DROP POLICY IF EXISTS "Authenticated users can delete driver_deduction_settings" ON driver_deduction_settings;
+DROP POLICY IF EXISTS "Staff read driver_deduction_settings" ON driver_deduction_settings;
+DROP POLICY IF EXISTS "Financial staff insert driver_deduction_settings" ON driver_deduction_settings;
+DROP POLICY IF EXISTS "Financial staff update driver_deduction_settings" ON driver_deduction_settings;
+DROP POLICY IF EXISTS "Financial staff delete driver_deduction_settings" ON driver_deduction_settings;
+
+CREATE POLICY "Staff read driver_deduction_settings"
+  ON driver_deduction_settings FOR SELECT TO authenticated
+  USING ((select get_user_role()) IN ('admin', 'dispatcher', 'accounting'));
+
+CREATE POLICY "Financial staff insert driver_deduction_settings"
+  ON driver_deduction_settings FOR INSERT TO authenticated
+  WITH CHECK ((select get_user_role()) IN ('admin', 'accounting'));
+
+CREATE POLICY "Financial staff update driver_deduction_settings"
+  ON driver_deduction_settings FOR UPDATE TO authenticated
+  USING ((select get_user_role()) IN ('admin', 'accounting'))
+  WITH CHECK ((select get_user_role()) IN ('admin', 'accounting'));
+
+CREATE POLICY "Financial staff delete driver_deduction_settings"
+  ON driver_deduction_settings FOR DELETE TO authenticated
+  USING ((select get_user_role()) IN ('admin', 'accounting'));
+
+
+-- ----- settlement_config -----
+DROP POLICY IF EXISTS "Authenticated users can read settlement_config" ON settlement_config;
+DROP POLICY IF EXISTS "Authenticated users can insert settlement_config" ON settlement_config;
+DROP POLICY IF EXISTS "Authenticated users can update settlement_config" ON settlement_config;
+DROP POLICY IF EXISTS "Staff read settlement_config" ON settlement_config;
+DROP POLICY IF EXISTS "Admin insert settlement_config" ON settlement_config;
+DROP POLICY IF EXISTS "Admin update settlement_config" ON settlement_config;
+
+CREATE POLICY "Staff read settlement_config"
+  ON settlement_config FOR SELECT TO authenticated
+  USING ((select get_user_role()) IN ('admin', 'dispatcher', 'accounting'));
+
+CREATE POLICY "Admin insert settlement_config"
+  ON settlement_config FOR INSERT TO authenticated
+  WITH CHECK ((select get_user_role()) = 'admin');
+
+CREATE POLICY "Admin update settlement_config"
+  ON settlement_config FOR UPDATE TO authenticated
+  USING ((select get_user_role()) = 'admin')
+  WITH CHECK ((select get_user_role()) = 'admin');
+
+
+-- ============================================================
+-- SECTION 4: Tighten audit tables
+-- ============================================================
+
+DROP POLICY IF EXISTS "Authenticated users can read chassis_audit_uploads" ON chassis_audit_uploads;
+DROP POLICY IF EXISTS "Authenticated users can insert chassis_audit_uploads" ON chassis_audit_uploads;
+DROP POLICY IF EXISTS "Authenticated users can update chassis_audit_uploads" ON chassis_audit_uploads;
+DROP POLICY IF EXISTS "Authenticated users can delete chassis_audit_uploads" ON chassis_audit_uploads;
+DROP POLICY IF EXISTS "Staff read chassis_audit_uploads" ON chassis_audit_uploads;
+DROP POLICY IF EXISTS "Staff insert chassis_audit_uploads" ON chassis_audit_uploads;
+DROP POLICY IF EXISTS "Staff update chassis_audit_uploads" ON chassis_audit_uploads;
+DROP POLICY IF EXISTS "Admin delete chassis_audit_uploads" ON chassis_audit_uploads;
+
+CREATE POLICY "Staff read chassis_audit_uploads"
+  ON chassis_audit_uploads FOR SELECT TO authenticated
+  USING ((select get_user_role()) IN ('admin', 'dispatcher', 'accounting'));
+
+CREATE POLICY "Staff insert chassis_audit_uploads"
+  ON chassis_audit_uploads FOR INSERT TO authenticated
+  WITH CHECK ((select get_user_role()) IN ('admin', 'dispatcher'));
+
+CREATE POLICY "Staff update chassis_audit_uploads"
+  ON chassis_audit_uploads FOR UPDATE TO authenticated
+  USING ((select get_user_role()) IN ('admin', 'dispatcher'))
+  WITH CHECK ((select get_user_role()) IN ('admin', 'dispatcher'));
+
+CREATE POLICY "Admin delete chassis_audit_uploads"
+  ON chassis_audit_uploads FOR DELETE TO authenticated
+  USING ((select get_user_role()) = 'admin');
+
+
+DROP POLICY IF EXISTS "Authenticated users can read waiting_time_events" ON waiting_time_events;
+DROP POLICY IF EXISTS "Authenticated users can insert waiting_time_events" ON waiting_time_events;
+DROP POLICY IF EXISTS "Authenticated users can update waiting_time_events" ON waiting_time_events;
+DROP POLICY IF EXISTS "Authenticated users can delete waiting_time_events" ON waiting_time_events;
+DROP POLICY IF EXISTS "Staff read waiting_time_events" ON waiting_time_events;
+DROP POLICY IF EXISTS "Staff insert waiting_time_events" ON waiting_time_events;
+DROP POLICY IF EXISTS "Staff update waiting_time_events" ON waiting_time_events;
+DROP POLICY IF EXISTS "Admin delete waiting_time_events" ON waiting_time_events;
+
+CREATE POLICY "Staff read waiting_time_events"
+  ON waiting_time_events FOR SELECT TO authenticated
+  USING ((select get_user_role()) IN ('admin', 'dispatcher', 'accounting'));
+
+CREATE POLICY "Staff insert waiting_time_events"
+  ON waiting_time_events FOR INSERT TO authenticated
+  WITH CHECK ((select get_user_role()) IN ('admin', 'dispatcher'));
+
+CREATE POLICY "Staff update waiting_time_events"
+  ON waiting_time_events FOR UPDATE TO authenticated
+  USING ((select get_user_role()) IN ('admin', 'dispatcher'))
+  WITH CHECK ((select get_user_role()) IN ('admin', 'dispatcher'));
+
+CREATE POLICY "Admin delete waiting_time_events"
+  ON waiting_time_events FOR DELETE TO authenticated
+  USING ((select get_user_role()) = 'admin');
+
+
+-- ============================================================
+-- SECTION 5: Tighten rate system tables
+-- ============================================================
+
+DROP POLICY IF EXISTS "Authenticated users can read rate_profiles" ON rate_profiles;
+DROP POLICY IF EXISTS "Staff read rate_profiles" ON rate_profiles;
+DROP POLICY IF EXISTS "Admin write rate_profiles" ON rate_profiles;
+DROP POLICY IF EXISTS "Admin update rate_profiles" ON rate_profiles;
+DROP POLICY IF EXISTS "Admin delete rate_profiles" ON rate_profiles;
+
+CREATE POLICY "Staff read rate_profiles"
+  ON rate_profiles FOR SELECT TO authenticated
+  USING ((select get_user_role()) IN ('admin', 'dispatcher', 'accounting'));
+CREATE POLICY "Admin write rate_profiles"
+  ON rate_profiles FOR INSERT TO authenticated
+  WITH CHECK ((select get_user_role()) = 'admin');
+CREATE POLICY "Admin update rate_profiles"
+  ON rate_profiles FOR UPDATE TO authenticated
+  USING ((select get_user_role()) = 'admin')
+  WITH CHECK ((select get_user_role()) = 'admin');
+CREATE POLICY "Admin delete rate_profiles"
+  ON rate_profiles FOR DELETE TO authenticated
+  USING ((select get_user_role()) = 'admin');
+
+DROP POLICY IF EXISTS "Authenticated users can read rate_profile_lanes" ON rate_profile_lanes;
+DROP POLICY IF EXISTS "Staff read rate_profile_lanes" ON rate_profile_lanes;
+DROP POLICY IF EXISTS "Admin write rate_profile_lanes" ON rate_profile_lanes;
+DROP POLICY IF EXISTS "Admin update rate_profile_lanes" ON rate_profile_lanes;
+DROP POLICY IF EXISTS "Admin delete rate_profile_lanes" ON rate_profile_lanes;
+
+CREATE POLICY "Staff read rate_profile_lanes"
+  ON rate_profile_lanes FOR SELECT TO authenticated
+  USING ((select get_user_role()) IN ('admin', 'dispatcher', 'accounting'));
+CREATE POLICY "Admin write rate_profile_lanes"
+  ON rate_profile_lanes FOR INSERT TO authenticated
+  WITH CHECK ((select get_user_role()) = 'admin');
+CREATE POLICY "Admin update rate_profile_lanes"
+  ON rate_profile_lanes FOR UPDATE TO authenticated
+  USING ((select get_user_role()) = 'admin')
+  WITH CHECK ((select get_user_role()) = 'admin');
+CREATE POLICY "Admin delete rate_profile_lanes"
+  ON rate_profile_lanes FOR DELETE TO authenticated
+  USING ((select get_user_role()) = 'admin');
+
+DROP POLICY IF EXISTS "Authenticated users can read rate_profile_charges" ON rate_profile_charges;
+DROP POLICY IF EXISTS "Staff read rate_profile_charges" ON rate_profile_charges;
+DROP POLICY IF EXISTS "Admin write rate_profile_charges" ON rate_profile_charges;
+DROP POLICY IF EXISTS "Admin update rate_profile_charges" ON rate_profile_charges;
+DROP POLICY IF EXISTS "Admin delete rate_profile_charges" ON rate_profile_charges;
+
+CREATE POLICY "Staff read rate_profile_charges"
+  ON rate_profile_charges FOR SELECT TO authenticated
+  USING ((select get_user_role()) IN ('admin', 'dispatcher', 'accounting'));
+CREATE POLICY "Admin write rate_profile_charges"
+  ON rate_profile_charges FOR INSERT TO authenticated
+  WITH CHECK ((select get_user_role()) = 'admin');
+CREATE POLICY "Admin update rate_profile_charges"
+  ON rate_profile_charges FOR UPDATE TO authenticated
+  USING ((select get_user_role()) = 'admin')
+  WITH CHECK ((select get_user_role()) = 'admin');
+CREATE POLICY "Admin delete rate_profile_charges"
+  ON rate_profile_charges FOR DELETE TO authenticated
+  USING ((select get_user_role()) = 'admin');
+
+DROP POLICY IF EXISTS "Authenticated users can read rate_profile_conditions" ON rate_profile_conditions;
+DROP POLICY IF EXISTS "Staff read rate_profile_conditions" ON rate_profile_conditions;
+DROP POLICY IF EXISTS "Admin write rate_profile_conditions" ON rate_profile_conditions;
+DROP POLICY IF EXISTS "Admin update rate_profile_conditions" ON rate_profile_conditions;
+DROP POLICY IF EXISTS "Admin delete rate_profile_conditions" ON rate_profile_conditions;
+
+CREATE POLICY "Staff read rate_profile_conditions"
+  ON rate_profile_conditions FOR SELECT TO authenticated
+  USING ((select get_user_role()) IN ('admin', 'dispatcher', 'accounting'));
+CREATE POLICY "Admin write rate_profile_conditions"
+  ON rate_profile_conditions FOR INSERT TO authenticated
+  WITH CHECK ((select get_user_role()) = 'admin');
+CREATE POLICY "Admin update rate_profile_conditions"
+  ON rate_profile_conditions FOR UPDATE TO authenticated
+  USING ((select get_user_role()) = 'admin')
+  WITH CHECK ((select get_user_role()) = 'admin');
+CREATE POLICY "Admin delete rate_profile_conditions"
+  ON rate_profile_conditions FOR DELETE TO authenticated
+  USING ((select get_user_role()) = 'admin');
+
+DROP POLICY IF EXISTS "Authenticated users can read charge_codes" ON charge_codes;
+DROP POLICY IF EXISTS "Staff read charge_codes" ON charge_codes;
+DROP POLICY IF EXISTS "Admin write charge_codes" ON charge_codes;
+DROP POLICY IF EXISTS "Admin update charge_codes" ON charge_codes;
+DROP POLICY IF EXISTS "Admin delete charge_codes" ON charge_codes;
+
+CREATE POLICY "Staff read charge_codes"
+  ON charge_codes FOR SELECT TO authenticated
+  USING ((select get_user_role()) IN ('admin', 'dispatcher', 'accounting'));
+CREATE POLICY "Admin write charge_codes"
+  ON charge_codes FOR INSERT TO authenticated
+  WITH CHECK ((select get_user_role()) = 'admin');
+CREATE POLICY "Admin update charge_codes"
+  ON charge_codes FOR UPDATE TO authenticated
+  USING ((select get_user_role()) = 'admin')
+  WITH CHECK ((select get_user_role()) = 'admin');
+CREATE POLICY "Admin delete charge_codes"
+  ON charge_codes FOR DELETE TO authenticated
+  USING ((select get_user_role()) = 'admin');
+
+-- rate_profile_driver_groups
+DROP POLICY IF EXISTS "Admin and dispatchers can manage rate profile driver groups" ON rate_profile_driver_groups;
+DROP POLICY IF EXISTS "Admin write rate_profile_driver_groups" ON rate_profile_driver_groups;
+DROP POLICY IF EXISTS "Admin update rate_profile_driver_groups" ON rate_profile_driver_groups;
+DROP POLICY IF EXISTS "Admin delete rate_profile_driver_groups" ON rate_profile_driver_groups;
+DROP POLICY IF EXISTS "Staff read rate_profile_driver_groups" ON rate_profile_driver_groups;
+
+CREATE POLICY "Staff read rate_profile_driver_groups"
+  ON rate_profile_driver_groups FOR SELECT TO authenticated
+  USING ((select get_user_role()) IN ('admin', 'dispatcher', 'accounting'));
+CREATE POLICY "Admin write rate_profile_driver_groups"
+  ON rate_profile_driver_groups FOR INSERT TO authenticated
+  WITH CHECK ((select get_user_role()) IN ('admin', 'dispatcher'));
+CREATE POLICY "Admin update rate_profile_driver_groups"
+  ON rate_profile_driver_groups FOR UPDATE TO authenticated
+  USING ((select get_user_role()) IN ('admin', 'dispatcher'))
+  WITH CHECK ((select get_user_role()) IN ('admin', 'dispatcher'));
+CREATE POLICY "Admin delete rate_profile_driver_groups"
+  ON rate_profile_driver_groups FOR DELETE TO authenticated
+  USING ((select get_user_role()) IN ('admin', 'dispatcher'));
+
+
+-- ============================================================
+-- SECTION 6: Fix driver SELECT policy on loads to use
+-- cached (select auth.uid()) instead of bare auth.uid()
+-- ============================================================
+
+DROP POLICY IF EXISTS "Drivers read own loads" ON loads;
+CREATE POLICY "Drivers read own loads"
+  ON loads FOR SELECT TO authenticated
+  USING (
+    (select get_user_role()) = 'driver'
+    AND driver_id = (select auth.uid())
+  );
+
+
+-- ============================================================
+-- SECTION 7: Add INSERT/UPDATE/DELETE policies for drivers table
+-- ============================================================
+
+DROP POLICY IF EXISTS "Staff insert drivers" ON drivers;
+DROP POLICY IF EXISTS "Staff update drivers" ON drivers;
+DROP POLICY IF EXISTS "Admin delete drivers" ON drivers;
+
+CREATE POLICY "Staff insert drivers"
+  ON drivers FOR INSERT TO authenticated
+  WITH CHECK ((select get_user_role()) IN ('admin', 'dispatcher'));
+
+CREATE POLICY "Staff update drivers"
+  ON drivers FOR UPDATE TO authenticated
+  USING ((select get_user_role()) IN ('admin', 'dispatcher'))
+  WITH CHECK ((select get_user_role()) IN ('admin', 'dispatcher'));
+
+CREATE POLICY "Admin delete drivers"
+  ON drivers FOR DELETE TO authenticated
+  USING ((select get_user_role()) = 'admin');
+
+
+-- ============================================================
+-- SECTION 8: Add write policies for documents table
+-- ============================================================
+
+DROP POLICY IF EXISTS "Staff insert documents" ON documents;
+DROP POLICY IF EXISTS "Staff update documents" ON documents;
+DROP POLICY IF EXISTS "Admin delete documents" ON documents;
+
+CREATE POLICY "Staff insert documents"
+  ON documents FOR INSERT TO authenticated
+  WITH CHECK ((select get_user_role()) IN ('admin', 'dispatcher', 'accounting'));
+
+CREATE POLICY "Staff update documents"
+  ON documents FOR UPDATE TO authenticated
+  USING ((select get_user_role()) IN ('admin', 'dispatcher', 'accounting'))
+  WITH CHECK ((select get_user_role()) IN ('admin', 'dispatcher', 'accounting'));
+
+CREATE POLICY "Admin delete documents"
+  ON documents FOR DELETE TO authenticated
+  USING ((select get_user_role()) = 'admin');
+
+
+-- ============================================================
+-- SECTION 9: user_profiles — admin read all, user update own
+-- ============================================================
+
+DROP POLICY IF EXISTS "Admin read all profiles" ON user_profiles;
+DROP POLICY IF EXISTS "Users update own profile" ON user_profiles;
+DROP POLICY IF EXISTS "Admin update any profile" ON user_profiles;
+
+CREATE POLICY "Admin read all profiles"
+  ON user_profiles FOR SELECT TO authenticated
+  USING ((select get_user_role()) = 'admin');
+
+CREATE POLICY "Users update own profile"
+  ON user_profiles FOR UPDATE TO authenticated
+  USING (id = (select auth.uid()))
+  WITH CHECK (id = (select auth.uid()));
+
+CREATE POLICY "Admin update any profile"
+  ON user_profiles FOR UPDATE TO authenticated
+  USING ((select get_user_role()) = 'admin')
+  WITH CHECK ((select get_user_role()) = 'admin');
