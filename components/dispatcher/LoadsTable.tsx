@@ -18,6 +18,7 @@ import {
   formatSyncedAgo,
   hoursSince,
 } from "@/lib/time/relative"
+import { getDriverLastSeenLabel } from "@/lib/live-tracking/driver-location"
 
 type Driver = {
   id: string
@@ -274,6 +275,7 @@ function getColumnValue(key: string, load: LoadWithRelations, nowMs: number | nu
     case "reference_number": return load.reference_number || ""
     case "status": return load.status || ""
     case "driver": return load.drivers?.name || ""
+    case "driver_last_seen": return getDriverLastSeenLabel(load, nowMs) || ""
     case "load_type": return load.load_type || ""
     case "container_number": return load.containers?.container_number || ""
     case "ref_number": return load.house_bol || load.mbol || ""
@@ -369,6 +371,7 @@ export function LoadsTable({ loads: serverLoads, availableDrivers, visibleColumn
     driverName: (row: LoadWithRelations) => row.drivers?.name ?? "",
     containerNumber: (row: LoadWithRelations) => row.containers?.container_number ?? "",
     lfd_erd: (row: LoadWithRelations) => row.containers?.last_free_day || row.per_diem_free_day || "",
+    last_seen_at: (row: LoadWithRelations) => row.last_seen_at ?? "",
   }), [])
 
   const { sortedData, sortConfig, requestSort } = useTableSort(loads, null, getValue)
@@ -701,6 +704,28 @@ export function LoadsTable({ loads: serverLoads, availableDrivers, visibleColumn
                 </div>
               )}
             </div>
+          </td>
+        )
+      }
+      case "driver_last_seen": {
+        const lastSeenLabel = getDriverLastSeenLabel(load, clientNow)
+        return (
+          <td key={key} className="px-2 py-2.5 whitespace-nowrap">
+            {lastSeenLabel ? (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setSelectedLoad(load)
+                }}
+                className="text-blue-400 hover:text-blue-300 text-[11px] font-medium"
+                title="Open load detail — live map"
+              >
+                {lastSeenLabel}
+              </button>
+            ) : (
+              <span className="text-gray-500">—</span>
+            )}
           </td>
         )
       }

@@ -2,6 +2,7 @@
 // Single load detail view for customer portal
 import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { resolveLoadDocumentUrl } from "@/lib/load-documents/resolve-document-url"
 import { redirect, notFound } from "next/navigation"
 import { PortalLoadDetail } from "@/components/portal/PortalLoadDetail"
 
@@ -70,23 +71,22 @@ export default async function PortalLoadDetailPage({
     .eq("load_id", id)
     .order("uploaded_at", { ascending: false })
 
-  // Generate fresh signed URLs (per-doc try/catch so one failure doesn't break all)
   const adminSupabase = createAdminClient()
   const documentsWithUrls = await Promise.all(
     (documents || []).map(async (doc) => {
-      if (doc.storage_path) {
-        try {
-          const { data: signedData } = await adminSupabase.storage
-            .from("load-documents")
-            .createSignedUrl(doc.storage_path, 3600)
-          return { ...doc, url: signedData?.signedUrl || doc.url }
-        } catch (e) {
-          console.error(`Failed to sign URL for ${doc.storage_path}:`, e)
-          return doc
-        }
+      if (!doc.storage_path) return doc
+      try {
+        const url = await resolveLoadDocumentUrl(
+          adminSupabase,
+          doc.storage_path,
+          doc.url,
+        )
+        return { ...doc, url }
+      } catch (e) {
+        console.error(`Failed to sign URL for ${doc.storage_path}:`, e)
+        return doc
       }
-      return doc
-    })
+    }),
   )
 
   return <PortalLoadDetail load={load} documents={documentsWithUrls} />

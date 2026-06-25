@@ -1,5 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 
+import {
+  DELIVERY_WAIT_INVOICE_CHARGE_TYPE,
+  DELIVERY_WAIT_INVOICE_LINE_LABEL,
+} from "@/lib/wait-time/invoice-labels"
+
 type WaitEventForBilling = {
   id: string
   event_name: string
@@ -14,10 +19,23 @@ export function waitEventBillingTag(eventId: string): string {
   return `[wte:${eventId}]`
 }
 
+function resolveBillableMinutes(event: WaitEventForBilling): number {
+  const duration = event.duration_minutes ?? 0
+  const freeMinutes = event.free_time_minutes ?? 60
+  return Math.max(0, duration - freeMinutes)
+}
+
 export function buildWaitEventBillingDescription(event: WaitEventForBilling): string {
   const freeMinutes = event.free_time_minutes ?? 60
   const duration = event.duration_minutes ?? 0
-  return `${event.event_name} — ${duration} min (${freeMinutes} min free) ${waitEventBillingTag(event.id)}`
+  const billableMinutes = resolveBillableMinutes(event)
+  const tag = waitEventBillingTag(event.id)
+
+  if (event.event_name === "delivery_wait") {
+    return `${DELIVERY_WAIT_INVOICE_LINE_LABEL} — ${billableMinutes} min billable (${duration} min total, ${freeMinutes} min free) ${tag}`
+  }
+
+  return `${event.event_name} — ${duration} min (${freeMinutes} min free) ${tag}`
 }
 
 /**
@@ -42,7 +60,7 @@ export async function syncWaitEventToLoadBilling(
     .from("load_billing")
     .select("id, amount")
     .eq("load_id", loadId)
-    .eq("charge_type", "Detention")
+    .eq("charge_type", DELIVERY_WAIT_INVOICE_CHARGE_TYPE)
     .ilike("description", `%${tag}%`)
     .maybeSingle()
 
@@ -58,7 +76,7 @@ export async function syncWaitEventToLoadBilling(
 
   const { error } = await adminSupabase.from("load_billing").insert({
     load_id: loadId,
-    charge_type: "Detention",
+    charge_type: DELIVERY_WAIT_INVOICE_CHARGE_TYPE,
     description,
     amount,
     created_at: now,

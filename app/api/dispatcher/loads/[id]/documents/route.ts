@@ -1,6 +1,7 @@
 // app/api/dispatcher/loads/[id]/documents/route.ts
 // Dispatcher (browser cookies) + Tigerhawk Mobile (Bearer header and/or form access_token).
 import { enrichLoadDocuments } from "@/lib/load-documents/enrich"
+import { attachLoadDocumentUrls } from "@/lib/load-documents/resolve-document-url"
 import {
   getDocumentTypeFromForm,
   parseMultipartFile,
@@ -69,20 +70,9 @@ export async function GET(
     }
 
     const adminSupabase = createAdminClient()
-    const documentsWithUrls = await Promise.all(
-      (documents || []).map(async (doc) => {
-        if (doc.storage_path) {
-          const { data: signedData } = await adminSupabase.storage
-            .from("load-documents")
-            .createSignedUrl(doc.storage_path, 3600)
-
-          return {
-            ...doc,
-            url: signedData?.signedUrl || doc.url,
-          }
-        }
-        return doc
-      }),
+    const documentsWithUrls = await attachLoadDocumentUrls(
+      adminSupabase,
+      documents || [],
     )
 
     const enriched = await enrichLoadDocuments(adminSupabase, documentsWithUrls)
@@ -241,6 +231,7 @@ export async function POST(
       load,
       file,
       documentType: normalizedType,
+      requestedDocumentType: docTypeResult.data,
     })
 
     if (!result.ok) {

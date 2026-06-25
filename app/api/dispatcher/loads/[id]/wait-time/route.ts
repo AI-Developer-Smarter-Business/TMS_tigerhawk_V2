@@ -7,6 +7,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { resolveWaitTimeAccess } from "@/lib/wait-time/access"
 import { resolveWaitEventDriverId } from "@/lib/wait-time/resolve-event-driver-id"
 import { maybeNotifyWaitExceeded } from "@/lib/wait-time/notify-exceeded"
+import { notifyOpenDeliveryWaitSideEffects } from "@/lib/wait-time/notify-delivery-wait-customer-emails"
 import { syncWaitEventToLoadBilling } from "@/lib/wait-time/sync-load-billing"
 
 const VALID_EVENTS = [
@@ -52,6 +53,33 @@ async function notifyIfBillable(
     )
   } catch {
     // Non-fatal — billing still applied via trigger
+  }
+}
+
+async function notifyDeliveryWaitEmailsIfDue(
+  adminSupabase: ReturnType<typeof createAdminClient>,
+  event: Record<string, unknown>,
+  actorUserId: string,
+) {
+  try {
+    await notifyOpenDeliveryWaitSideEffects(
+      adminSupabase,
+      {
+        id: event.id as string,
+        load_id: event.load_id as string,
+        event_name: event.event_name as string,
+        start_time: (event.start_time as string | null) ?? null,
+        end_time: (event.end_time as string | null) ?? null,
+        duration_minutes: (event.duration_minutes as number | null) ?? null,
+        free_time_minutes: (event.free_time_minutes as number | null) ?? null,
+        charge_amount: (event.charge_amount as number | null) ?? null,
+        billable: (event.billable as boolean | null) ?? null,
+        rate_per_hour: (event.rate_per_hour as number | null) ?? null,
+      },
+      actorUserId,
+    )
+  } catch (err) {
+    console.error("[wait-time] detention customer emails:", err)
   }
 }
 
@@ -217,6 +245,7 @@ export async function POST(request: NextRequest, { params }: Props) {
     }
 
     await notifyIfBillable(event, load, user.id)
+    await notifyDeliveryWaitEmailsIfDue(adminSupabase, event, user.id)
     if (event.end_time) {
       await syncWaitEventToLoadBilling(adminSupabase, id, event)
     }
@@ -322,6 +351,7 @@ export async function PATCH(request: NextRequest, { params }: Props) {
 
     if (load && event) {
       await notifyIfBillable(event, load, user.id)
+      await notifyDeliveryWaitEmailsIfDue(adminSupabase, event, user.id)
       if (event.end_time) {
         await syncWaitEventToLoadBilling(adminSupabase, id, event)
       }

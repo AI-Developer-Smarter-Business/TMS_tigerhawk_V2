@@ -2,6 +2,7 @@
 // Customer portal API: list documents for a specific load
 import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { attachLoadDocumentUrls } from "@/lib/load-documents/resolve-document-url"
 import { NextRequest, NextResponse } from "next/server"
 
 export async function GET(
@@ -53,18 +54,10 @@ export async function GET(
       return NextResponse.json({ error: docsError.message }, { status: 500 })
     }
 
-    // Generate signed URLs
     const adminSupabase = createAdminClient()
-    const documentsWithUrls = await Promise.all(
-      (documents || []).map(async (doc) => {
-        if (doc.storage_path) {
-          const { data: signedData } = await adminSupabase.storage
-            .from("load-documents")
-            .createSignedUrl(doc.storage_path, 3600)
-          return { ...doc, url: signedData?.signedUrl || doc.url }
-        }
-        return doc
-      })
+    const documentsWithUrls = await attachLoadDocumentUrls(
+      adminSupabase,
+      documents || [],
     )
 
     return NextResponse.json({ documents: documentsWithUrls })

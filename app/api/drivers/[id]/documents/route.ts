@@ -1,6 +1,9 @@
 // app/api/drivers/[id]/documents/route.ts
 import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
+import {
+  resolveLoadDocumentUrl,
+} from "@/lib/load-documents/resolve-document-url"
 import { NextRequest, NextResponse } from "next/server"
 
 export async function GET(
@@ -26,18 +29,18 @@ export async function GET(
       return NextResponse.json({ error: error.message }, { status: 500 })
     }
 
-    // Refresh signed URLs
     const adminSupabase = createAdminClient()
     const docsWithUrls = await Promise.all(
       (documents || []).map(async (doc) => {
-        if (doc.storage_path) {
-          const { data: signedData } = await adminSupabase.storage
-            .from("driver-documents")
-            .createSignedUrl(doc.storage_path, 3600)
-          return { ...doc, url: signedData?.signedUrl || doc.url }
-        }
-        return doc
-      })
+        if (!doc.storage_path) return doc
+        const url = await resolveLoadDocumentUrl(
+          adminSupabase,
+          doc.storage_path,
+          doc.url,
+          "driver-documents",
+        )
+        return { ...doc, url }
+      }),
     )
 
     return NextResponse.json({ documents: docsWithUrls })
@@ -111,11 +114,12 @@ export async function POST(
       return NextResponse.json({ error: `Upload failed: ${uploadError.message}` }, { status: 500 })
     }
 
-    const { data: signedData } = await adminSupabase.storage
-      .from("driver-documents")
-      .createSignedUrl(storagePath, 3600)
-
-    const url = signedData?.signedUrl || ""
+    const url = await resolveLoadDocumentUrl(
+      adminSupabase,
+      storagePath,
+      null,
+      "driver-documents",
+    )
 
     const { data: document, error: insertError } = await supabase
       .from("driver_documents")

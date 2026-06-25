@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback, useRef } from "react"
+import { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import { useRouter } from "next/navigation"
 import { useSearchParams } from "next/navigation"
 import { LoadWithRelations, LoadDocument, LoadStatus, LOAD_STATUS_COLORS } from "@/types/dispatcher"
@@ -23,6 +23,12 @@ import { AssignDriverModal } from "../modals/AssignDriverModal"
 import { getActiveHoldKeys } from "@/lib/loadHolds"
 import { useUserRole } from "@/lib/auth/useUserRole"
 import { useRealtimeRefresh } from "@/hooks/useRealtimeRefresh"
+import { useLoadLiveLocation } from "@/hooks/useLoadLiveLocation"
+import {
+  formatLastSeenAt,
+  isLiveTrackingActiveStatus,
+  parseDriverLiveLocation,
+} from "@/lib/live-tracking/driver-location"
 import { isDriverUploadDocument } from "@/lib/load-documents/enrich"
 
 type TabType = "info" | "billing" | "documents" | "payments" | "routing" | "driver-pay" | "tracking" | "messaging" | "audit" | "notes"
@@ -80,6 +86,27 @@ export function LoadDetailPanel({ load, loads, onClose, onUpdate, onNavigate }: 
     setLoadData(load)
     distanceSavedRef.current = false // Reset on load change so distance re-saves for new load
   }, [load])
+
+  const initialDriverLocation = useMemo(
+    () => parseDriverLiveLocation(loadData),
+    [
+      loadData.current_latitude,
+      loadData.current_longitude,
+      loadData.last_seen_at,
+      loadData.location_accuracy_m,
+    ],
+  )
+  const liveDriverLocation = useLoadLiveLocation(loadData.id, initialDriverLocation)
+  const driverMapLocation = useMemo(() => {
+    if (!liveDriverLocation || !isLiveTrackingActiveStatus(loadData.status)) {
+      return null
+    }
+    return {
+      lat: liveDriverLocation.latitude,
+      lng: liveDriverLocation.longitude,
+      lastSeenLabel: formatLastSeenAt(liveDriverLocation.lastSeenAt),
+    }
+  }, [liveDriverLocation, loadData.status])
 
   // Save OSRM-calculated distance to loads.distance for rate calculations
   const handleDistanceCalculated = useCallback(async (totalMiles: number) => {
@@ -547,12 +574,13 @@ export function LoadDetailPanel({ load, loads, onClose, onUpdate, onNavigate }: 
                     <span className="text-xs font-medium text-gray-400">{routeDistance} mi</span>
                   )}
                 </div>
-                {orgAddressesReady && (loadData.pickup_location || loadData.delivery_location) ? (
+                {orgAddressesReady && (loadData.pickup_location || loadData.delivery_location || driverMapLocation) ? (
                   <LoadSidebarMap
                     pickupLocation={buildFullAddress(loadData.pickup_location)}
                     deliveryLocation={buildFullAddress(loadData.delivery_location)}
                     returnLocation={buildFullAddress(loadData.return_location)}
                     onDistanceCalculated={handleDistanceCalculated}
+                    driverLocation={driverMapLocation}
                   />
                 ) : orgAddressesReady ? (
                   <div className="h-[80px] bg-white/5 rounded-lg flex items-center justify-center">
@@ -578,6 +606,13 @@ export function LoadDetailPanel({ load, loads, onClose, onUpdate, onNavigate }: 
                   {loadData.return_location && (
                     <span className="flex items-center gap-1 text-[10px] text-gray-400">
                       <span className="w-2 h-2 rounded-full bg-purple-500 inline-block" />Return
+                    </span>
+                  )}
+                  {driverMapLocation && (
+                    <span className="flex items-center gap-1 text-[10px] text-gray-400">
+                      <span className="w-2 h-2 rounded-full bg-blue-500 inline-block" />
+                      Driver
+                      <span className="text-gray-500">({driverMapLocation.lastSeenLabel})</span>
                     </span>
                   )}
                 </div>

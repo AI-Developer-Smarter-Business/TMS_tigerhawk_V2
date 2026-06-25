@@ -2,6 +2,7 @@
 // Cross-load document browser for customer portal
 import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { resolveLoadDocumentUrl } from "@/lib/load-documents/resolve-document-url"
 import { redirect } from "next/navigation"
 import { PortalDocumentsClient } from "@/components/portal/PortalDocumentsClient"
 
@@ -48,17 +49,17 @@ export default async function PortalDocumentsPage() {
     documents = docs || []
   }
 
-  // Generate signed URLs — use try/catch per document so one failure doesn't break the page
   const adminSupabase = createAdminClient()
   const documentsWithUrls = await Promise.all(
     documents.map(async (doc) => {
       let url = doc.url as string
       if (doc.storage_path) {
         try {
-          const { data: signedData } = await adminSupabase.storage
-            .from("load-documents")
-            .createSignedUrl(doc.storage_path as string, 3600)
-          url = signedData?.signedUrl || url
+          url = await resolveLoadDocumentUrl(
+            adminSupabase,
+            doc.storage_path as string,
+            url,
+          )
         } catch (e) {
           console.error(`Failed to sign URL for ${doc.storage_path}:`, e)
         }

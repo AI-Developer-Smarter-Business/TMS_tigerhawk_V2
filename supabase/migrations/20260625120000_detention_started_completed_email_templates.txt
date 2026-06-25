@@ -1,0 +1,18 @@
+-- WT.30 + WT.31 — Seed detention_started and detention_completed (mirror mobile sql-editor/)
+
+INSERT INTO email_templates (template_key, name, subject, body_html, variables) VALUES
+  (
+    'detention_started',
+    'Detention Started (60 minutes)',
+    'Load {{reference_number}} — billable detention started',
+    '<h2>Billable detention started</h2><p>Hi {{customer_name}},</p><p>Your shipment <strong>{{reference_number}}</strong> at <strong>{{delivery_location}}</strong> has exceeded the <strong>{{free_minutes}} minutes</strong> of free waiting time.</p><p><strong>Billable detention</strong> is now in effect. Elapsed: <strong>{{minutes_elapsed}} minutes</strong> · Billable: <strong>{{billable_minutes}} minutes</strong> · Estimated charge: <strong>{{estimated_charge}}</strong>.</p><p>Container: {{container_number}}</p><p>Wait started: {{wait_start_time}}</p><p>Questions? Contact us at {{company_contact_email}} or {{company_phone}}.</p><p>— TigerHawk Logistics</p>',
+    ARRAY['customer_name', 'reference_number', 'container_number', 'delivery_location', 'wait_start_time', 'free_minutes', 'minutes_elapsed', 'billable_minutes', 'estimated_charge', 'company_contact_email', 'company_phone']
+  ),
+  (
+    'detention_completed',
+    'Detention Completed Summary',
+    'Load {{reference_number}} — delivery wait summary',
+    '<h2>Delivery wait summary</h2><p>Hi {{customer_name}},</p><p>Waiting time for load <strong>{{reference_number}}</strong> at <strong>{{delivery_location}}</strong> has ended.</p><ul><li>Started: {{wait_start_time}}</li><li>Ended: {{wait_end_time}}</li><li>Total wait: {{total_minutes}} minutes</li><li>Free time: {{free_minutes}} minutes</li><li>Billable detention: {{billable_minutes}} minutes</li><li>Estimated charge: {{estimated_charge}}</li></ul><p>If you believe there is a discrepancy, please contact us at {{company_contact_email}} or {{company_phone}}. Otherwise, this wait time will be considered valid for billing.</p><p>— TigerHawk Logistics</p>',
+    ARRAY['customer_name', 'reference_number', 'container_number', 'delivery_location', 'wait_start_time', 'wait_end_time', 'total_minutes', 'free_minutes', 'billable_minutes', 'estimated_charge', 'company_contact_email', 'company_phone']
+  )
+ON CONFLICT (template_key) DO NOTHING;

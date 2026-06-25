@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, type ComponentType } from "react"
 import dynamic from "next/dynamic"
 
 type Coords = { lat: number; lng: number }
@@ -15,6 +15,12 @@ type LoadSidebarMapProps = {
   deliveryLocation: string | null
   returnLocation?: string | null
   onDistanceCalculated?: (totalMiles: number) => void
+  /** Live driver position (PP2 8.12) — updated via Realtime in parent */
+  driverLocation?: {
+    lat: number
+    lng: number
+    lastSeenLabel: string
+  } | null
 }
 
 // In-memory geocode cache (persists across re-renders, clears on page reload)
@@ -68,16 +74,16 @@ async function fetchRoute(from: Coords, to: Coords): Promise<RouteSegment | null
   return null
 }
 
-type MapPoint = { coords: Coords; label: string; color: string }
+type MapPoint = { coords: Coords; label: string; color: string; meta?: string; size?: number }
 
-// Inner map component — loaded without SSR
-function InnerMap({
-  points,
-  routeSegments,
-}: {
+type InnerMapProps = {
   points: MapPoint[]
   routeSegments: RouteSegment[]
-}) {
+  boundsPoints: MapPoint[]
+}
+
+// Inner map component — loaded without SSR
+function InnerMap({ points, routeSegments, boundsPoints }: InnerMapProps) {
   const L = require("leaflet")
   const { MapContainer, TileLayer, Marker, Polyline, Tooltip, useMap } = require("react-leaflet")
   const { useEffect: useEffectLocal } = require("react")
@@ -92,17 +98,18 @@ function InnerMap({
   }
 
   // Create colored marker icons
-  const createIcon = (color: string) => {
+  const createIcon = (color: string, size = 12) => {
+    const anchor = size / 2
     return L.divIcon({
       className: "custom-marker",
-      html: `<div style="width:12px;height:12px;border-radius:50%;background:${color};border:2px solid white;box-shadow:0 1px 4px rgba(0,0,0,0.4);"></div>`,
-      iconSize: [12, 12],
-      iconAnchor: [6, 6],
+      html: `<div style="width:${size}px;height:${size}px;border-radius:50%;background:${color};border:2px solid white;box-shadow:0 1px 4px rgba(0,0,0,0.4);"></div>`,
+      iconSize: [size, size],
+      iconAnchor: [anchor, anchor],
     })
   }
 
-  // Collect all coordinates for bounds
-  const allCoords: [number, number][] = points.map((p) => [p.coords.lat, p.coords.lng] as [number, number])
+  // Collect coordinates for bounds (stops + route only — driver marker does not re-fit)
+  const allCoords: [number, number][] = boundsPoints.map((p) => [p.coords.lat, p.coords.lng] as [number, number])
   for (const seg of routeSegments) {
     for (const coord of seg.coordinates) {
       allCoords.push(coord as [number, number])
@@ -161,9 +168,19 @@ function InnerMap({
 
       {/* Markers */}
       {points.map((point, i) => (
-        <Marker key={i} position={[point.coords.lat, point.coords.lng]} icon={createIcon(point.color)}>
+        <Marker
+          key={i}
+          position={[point.coords.lat, point.coords.lng]}
+          icon={createIcon(point.color, point.size ?? 12)}
+        >
           <Tooltip direction="top" offset={[0, -8]} permanent={false}>
             <span style={{ fontSize: "11px", fontWeight: 600 }}>{point.label}</span>
+            {point.meta ? (
+              <>
+                <br />
+                <span style={{ fontSize: "10px", fontWeight: 400 }}>{point.meta}</span>
+              </>
+            ) : null}
           </Tooltip>
         </Marker>
       ))}
@@ -171,14 +188,50 @@ function InnerMap({
   )
 }
 
-// Dynamic import to avoid SSR
-const DynamicMap = dynamic(() => Promise.resolve(InnerMap), { ssr: false })
+// Dynamic import to avoid SSR — explicit props so `boundsPoints` type-checks at call site
+const DynamicMap = dynamic<InnerMapProps>(
+  () => Promise.resolve(InnerMap as ComponentType<InnerMapProps>),
+  { ssr: false },
+)
 
-export function LoadSidebarMap({ pickupLocation, deliveryLocation, returnLocation, onDistanceCalculated }: LoadSidebarMapProps) {
+export function LoadSidebarMap({
+  pickupLocation,
+  deliveryLocation,
+  returnLocation,
+  onDistanceCalculated,
+  driverLocation,
+}: LoadSidebarMapProps) {
   const [points, setPoints] = useState<MapPoint[]>([])
   const [routeSegments, setRouteSegments] = useState<RouteSegment[]>([])
   const [totalDistance, setTotalDistance] = useState<number | null>(null)
   const [isLoading, setIsLoading] = useState(true)
+
+  // Merge live driver marker after stop geocoding (no re-geocode on GPS tick)
+  const mapPoints = driverLocation
+    ? [
+        ...points,
+        {
+          coords: { lat: driverLocation.lat, lng: driverLocation.lng },
+          label: "Driver",
+          color: "#3b82f6",
+          meta: `Last seen: ${driverLocation.lastSeenLabel}`,
+          size: 14,
+        },
+      ]
+    : points
+
+  const boundsPoints =
+    points.length > 0
+      ? points
+      : driverLocation
+        ? [
+            {
+              coords: { lat: driverLocation.lat, lng: driverLocation.lng },
+              label: "Driver",
+              color: "#3b82f6",
+            },
+          ]
+        : []
 
   useEffect(() => {
     let cancelled = false
@@ -238,7 +291,7 @@ export function LoadSidebarMap({ pickupLocation, deliveryLocation, returnLocatio
     )
   }
 
-  if (points.length === 0) {
+  if (points.length === 0 && !driverLocation) {
     return (
       <div className="h-[160px] bg-white/5 rounded-lg flex items-center justify-center">
         <span className="text-xs text-gray-500">No locations to map</span>
@@ -248,7 +301,7 @@ export function LoadSidebarMap({ pickupLocation, deliveryLocation, returnLocatio
 
   return (
     <div className="h-[160px] rounded-lg overflow-hidden">
-      <DynamicMap points={points} routeSegments={routeSegments} />
+      <DynamicMap points={mapPoints} routeSegments={routeSegments} boundsPoints={boundsPoints} />
     </div>
   )
 }

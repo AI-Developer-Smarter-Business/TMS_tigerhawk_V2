@@ -2,6 +2,8 @@ import type { User } from "@supabase/supabase-js"
 import type { SupabaseClient } from "@supabase/supabase-js"
 
 import { enrichLoadDocuments } from "@/lib/load-documents/enrich"
+import { resolveLoadDocumentUrl } from "@/lib/load-documents/resolve-document-url"
+import { handlePodSignedSubmitted } from "@/lib/wait-time/handle-pod-signed-submitted"
 import { documentTypeSchema } from "@/lib/validations/schemas"
 import type { z } from "zod"
 
@@ -17,10 +19,28 @@ type ProcessUploadParams = {
   load: { id: string; reference_number: string; driver_id: string | null }
   file: File
   documentType: DocumentType
+  /** Original form value before driver normalization (WT.28 POD auto-stop). */
+  requestedDocumentType?: DocumentType
+}
+
+function isPodSubmission(
+  documentType: DocumentType,
+  requestedDocumentType?: DocumentType,
+): boolean {
+  return documentType === "POD" || requestedDocumentType === "POD"
 }
 
 export async function processLoadDocumentUpload(params: ProcessUploadParams) {
-  const { adminSupabase, loadId, user, profile, load, file, documentType } = params
+  const {
+    adminSupabase,
+    loadId,
+    user,
+    profile,
+    load,
+    file,
+    documentType,
+    requestedDocumentType,
+  } = params
 
   const timestamp = Date.now()
   const sanitizedName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_")
@@ -39,11 +59,7 @@ export async function processLoadDocumentUpload(params: ProcessUploadParams) {
     return { ok: false as const, status: 500, error: `Upload failed: ${uploadError.message}` }
   }
 
-  const { data: signedData } = await adminSupabase.storage
-    .from("load-documents")
-    .createSignedUrl(storagePath, 3600)
-
-  const url = signedData?.signedUrl || ""
+  const url = await resolveLoadDocumentUrl(adminSupabase, storagePath)
 
   const { data: document, error: insertError } = await adminSupabase
     .from("load_documents")
@@ -84,6 +100,22 @@ export async function processLoadDocumentUpload(params: ProcessUploadParams) {
       source: profile?.role === "driver" ? "driver_mobile" : "dispatcher",
     },
   })
+
+  if (isPodSubmission(documentType, requestedDocumentType)) {
+    try {
+      await handlePodSignedSubmitted(adminSupabase, {
+        loadId,
+        submittedAt: new Date().toISOString(),
+        source: "document_upload",
+        actorUserId: user.id,
+        documentId: document.id as string,
+        documentFilename: file.name,
+        requestedDocumentType,
+      })
+    } catch (err) {
+      console.error("[processLoadDocumentUpload] WT.28 pod auto-stop failed:", err)
+    }
+  }
 
   const [enriched] = await enrichLoadDocuments(adminSupabase, [document])
 

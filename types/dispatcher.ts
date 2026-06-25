@@ -153,6 +153,11 @@ export type Load = {
   // Tracking & dispatch
   distance: number | null
   last_tracked: string | null
+  /** PP2 Semana 8 — live driver GPS from Tigerhawk Mobile */
+  current_latitude?: number | null
+  current_longitude?: number | null
+  last_seen_at?: string | null
+  location_accuracy_m?: number | null
   csr: string | null
 
   // Driver pay

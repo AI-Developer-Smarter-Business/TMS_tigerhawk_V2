@@ -12,6 +12,7 @@ import {
   buildWaitEventBillingDescription,
   waitEventBillingTag,
 } from "@/lib/wait-time/sync-load-billing"
+import { DELIVERY_WAIT_INVOICE_CHARGE_TYPE } from "@/lib/wait-time/invoice-labels"
 
 export const runtime = "nodejs"
 
@@ -695,7 +696,7 @@ export async function PATCH(
 
               billingRecords.push({
                 load_id: id,
-                charge_type: "Detention",
+                charge_type: DELIVERY_WAIT_INVOICE_CHARGE_TYPE,
                 description: buildWaitEventBillingDescription(evt),
                 amount: chargeAmt,
                 created_at: billingNow,

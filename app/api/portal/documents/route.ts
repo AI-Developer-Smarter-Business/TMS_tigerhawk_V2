@@ -2,6 +2,7 @@
 // Customer portal API: list all documents across all customer loads
 import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { resolveLoadDocumentUrl } from "@/lib/load-documents/resolve-document-url"
 import { NextResponse } from "next/server"
 
 export async function GET() {
@@ -54,23 +55,20 @@ export async function GET() {
       return NextResponse.json({ error: docsError.message }, { status: 500 })
     }
 
-    // Generate signed URLs
     const adminSupabase = createAdminClient()
     const documentsWithUrls = await Promise.all(
       (documents || []).map(async (doc) => {
-        let url = doc.url
-        if (doc.storage_path) {
-          const { data: signedData } = await adminSupabase.storage
-            .from("load-documents")
-            .createSignedUrl(doc.storage_path, 3600)
-          url = signedData?.signedUrl || url
-        }
+        const url = await resolveLoadDocumentUrl(
+          adminSupabase,
+          doc.storage_path,
+          doc.url,
+        )
         return {
           ...doc,
           url,
           load_reference_number: loadRefMap[doc.load_id] || "—",
         }
-      })
+      }),
     )
 
     return NextResponse.json({ documents: documentsWithUrls })
